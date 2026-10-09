@@ -1,5 +1,10 @@
 const request = require('supertest');
 
+// Authentication is covered in auth.test.js; these tests focus on the endpoint itself.
+jest.mock('../api/middleware/requireAuth', () => ({
+  requireAuth: (_req, _res, next) => next()
+}));
+
 jest.mock('../integrations/openRouteService/directionsClient', () => ({
   getFastestWalkingRoute: jest.fn()
 }));

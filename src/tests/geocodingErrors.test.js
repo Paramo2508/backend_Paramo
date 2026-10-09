@@ -1,4 +1,10 @@
 const request = require('supertest');
+
+// Authentication is covered in auth.test.js; these tests focus on the endpoint itself.
+jest.mock('../api/middleware/requireAuth', () => ({
+  requireAuth: (_req, _res, next) => next()
+}));
+
 const { createApp } = require('../app');
 const { env } = require('../config/env');
 const { autocompletePlaces } = require('../integrations/openRouteService/geocodingClient');

@@ -77,7 +77,18 @@ const StreetSegment = sequelize.define(
   { ...options, tableName: 'street_segments' }
 );
 
+const User = sequelize.define(
+  'User',
+  {
+    name: { type: DataTypes.STRING(100), allowNull: false },
+    email: { type: DataTypes.STRING(254), allowNull: false },
+    passwordHash: DataTypes.STRING(100),
+    googleId: DataTypes.STRING(255)
+  },
+  { underscored: true, timestamps: true, tableName: 'users' }
+);
+
 ImportRun.hasMany(ImportRejection, { foreignKey: 'importRunId' });
 ImportRejection.belongsTo(ImportRun, { foreignKey: 'importRunId' });
 
-module.exports = { sequelize, ImportRun, ImportRejection, Building, Tree, StreetSegment };
+module.exports = { sequelize, ImportRun, ImportRejection, Building, Tree, StreetSegment, User };
