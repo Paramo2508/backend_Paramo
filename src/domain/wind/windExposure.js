@@ -1,4 +1,5 @@
 const { httpError } = require('../../utils/httpError');
+const { withCrosswind } = require('./streetOpenness');
 
 // Thresholds of ADR-024: calm below MIN, full effect from MAX (km/h).
 const MIN_WIND_SPEED_KMH = 10;
@@ -21,16 +22,18 @@ const validPieces = (pieces) =>
 /*
  * Streets are axes, not vectors: wind along the street scores the same from either end, so the
  * alignment is |cos| of the angle between the wind and each straight piece, weighted by length.
+ * With the openness of the street (PBI-8.3, ADR-028) the wind across it also counts; with 0, a
+ * canyon, only the part along it does.
  */
-function windAlignment(pieces, windDirectionDeg) {
+function windAlignment(pieces, windDirectionDeg, openness = 0) {
   const valid = validPieces(pieces);
   const totalM = valid.reduce((sum, piece) => sum + piece.lengthM, 0);
   if (totalM <= 0) return null;
-  const weighted = valid.reduce(
-    (sum, piece) =>
-      sum + piece.lengthM * Math.abs(Math.cos(toRadians(windDirectionDeg - piece.bearingDeg))),
-    0
-  );
+  const weighted = valid.reduce((sum, piece) => {
+    const angleDeg = windDirectionDeg - piece.bearingDeg;
+    const along = Math.abs(Math.cos(toRadians(angleDeg)));
+    return sum + piece.lengthM * withCrosswind(along, angleDeg, openness);
+  }, 0);
   return clamp(weighted / totalM, 0, 1);
 }
 
@@ -48,8 +51,8 @@ function streetOrientation(pieces) {
   return (degrees + 180) % 180;
 }
 
-function calculateWindExposure(pieces, { speedKmh, directionDeg }) {
-  const alignment = windAlignment(pieces, directionDeg);
+function calculateWindExposure(pieces, { speedKmh, directionDeg }, { openness = 0 } = {}) {
+  const alignment = windAlignment(pieces, directionDeg, openness);
   if (alignment === null) {
     return {
       status: 'unavailable',

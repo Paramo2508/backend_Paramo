@@ -563,13 +563,17 @@ curl --header "Authorization: Bearer $TOKEN" \
   "segmentId": 36044, "segmentSourceId": "399096155:2", "name": "Paseo de la Independencia",
   "lengthM": 83.23,
   "wind": { "speedKmh": 30, "directionDeg": 300, "source": "request", "time": null },
+  "openness": 0.2,
+  "street": { "widthM": 51.14, "heightM": 29.84, "hwRatio": 0.622, "samples": 5 },
   "status": "available", "reason": null,
-  "orientationDeg": 36.17, "alignment": 0.107, "intensity": 0.5, "windExposure": 5.37
+  "orientationDeg": 36.17, "alignment": 0.207, "intensity": 0.5, "windExposure": 10.34
 }
 ```
 
-(Decimales recortados.) El Paseo va de noreste a suroeste (36°), casi perpendicular a ese cierzo,
-así que la exposición es baja. Con el viento de
+(Decimales recortados; valores del 2026-11-07, con la apertura de la PBI-8.3. Antes de ella la
+alineación era 0,107 y la exposición 5,37.) El Paseo va de noreste a suroeste (36°), casi
+perpendicular a ese cierzo, así que la exposición es baja; como es una calle ancha (apertura 0,2),
+parte del viento que la cruza también cuenta. Con el viento de
 Open-Meteo, `wind.source` es `open-meteo` y `wind.time` la hora local del dato. `orientationDeg` es
 el eje dominante del tramo (0-180°); es `null` si ningún eje domina. Si el tramo no tiene geometría
 utilizable, `status` es `unavailable`, `reason` `invalid_segment_geometry` y los valores `null`.
@@ -581,7 +585,69 @@ utilizable, `status` es `unavailable`, `reason` `invalid_segment_geometry` y los
 | `404` | `No existe el tramo indicado.` |
 | `502`/`504` | Error o timeout de Open-Meteo cuando no se indica el viento. |
 
-No hay migraciones, dependencias ni variables de entorno nuevas.
+Desde la PBI-8.3 la respuesta incluye también `openness` y `street` (ver abajo).
+
+## Apertura de la calle (PBI-8.3)
+
+Cada tramo tiene una **apertura** de 0 (cañón estrecho) a 1 (espacio abierto) que decide si el
+viento que cruza la calle también cuenta (ADR-028):
+
+- **Medida:** `npm run compute:openness` toma un punto de muestra cada 20 m de cada tramo y, desde
+  cada uno, una línea perpendicular de hasta 40 m a cada lado. El primer edificio que corta da la
+  distancia a la fachada y su altura. Anchura W = distancia a la izquierda + a la derecha (un lado
+  sin edificios cuenta 40 m y altura 0); altura H = media de las dos fachadas.
+- **Apertura** (Oke, 1988): H/W ≤ 0,3 → 1; H/W ≥ 0,65 → 0; lineal entre medias. El tramo guarda la
+  media de sus muestras en `segment_openness` (migración `20261107000001-create-segment-openness`).
+  Un tramo sin edificios cerca (parque, ribera) tiene apertura 1, y uno sin apertura calculada
+  cuenta como abierto.
+- **Viento:** la parte a lo largo de la calle se canaliza siempre (PBI-8.1 y PBI-8.2); la que la
+  cruza solo llega si la calle es abierta y molesta la mitad:
+  `alineación = parte a lo largo + apertura × 0,5 × |sin θ|`, con tope 1. Con viento perpendicular,
+  un cañón da 0 y una plaza 0,5; lo alineado sigue puntuando más que lo perpendicular.
+- **Dónde se usa:** `GET /api/segments/:id/wind-exposure` devuelve `openness` (la usada) y `street`
+  (`widthM`, `heightM`, `hwRatio`, `samples`, o `null` si no se ha calculado). En
+  `POST /api/routes/weighted`, cada trozo de la ruta toma la apertura del tramo más cercano a menos
+  de 10 m (una sola consulta para todas las rutas, que se salta con viento en calma), y
+  `windExposure.openness` es la media de la ruta.
+
+```bash
+npm run compute:openness
+```
+
+Recalcula todos los tramos dentro de una transacción, por lotes, e imprime cuántos tramos tienen
+apertura, la media ponderada por longitud y la distribución. Termina con código 0 solo si todos los
+tramos de `street_segments` tienen apertura. Hay que volver a lanzarlo tras importar calles o
+edificios; el CD no lo hace. Variables opcionales en `.env.example` (`OPENNESS_*`).
+
+#### Resultados con datos reales (2026-11-07)
+
+Con las 89.974 calles de OSM y los 38.963 edificios de IDEZAR, `compute:openness` tarda unos 2
+minutos. Media ponderada por longitud: 0,88 (el término municipal incluye mucho camino periurbano);
+el 85,7 % de la longitud tiene apertura ≥ 0,75 y el 8,2 % < 0,25. Calles conocidas del centro
+(media ponderada por longitud de sus tramos):
+
+| Calle | Anchura (m) | Altura (m) | Apertura |
+| --- | --- | --- | --- |
+| Calle Mayor (Casco) | 11,8 | 21,1 | 0,04 |
+| Calle de Alfonso I | 16,4 | 24,4 | 0,07 |
+| Calle de San Miguel | 14,4 | 25,2 | 0,09 |
+| Calle del Coso | 32,0 | 24,3 | 0,28 |
+| Calle Manifestación | 25,4 | 18,3 | 0,30 |
+| Paseo de la Independencia | 52,4 | 28,1 | 0,33 |
+| Paseo de Sagasta | 48,7 | 26,5 | 0,35 |
+| Avenida de Cesáreo Alierta | 61,1 | 15,2 | 0,80 |
+| Paseo de Echegaray y Caballero (ribera) | 63,2 | 9,0 | 0,97 |
+| Caminos del Parque Grande | — | — | 0,93 |
+
+Las calles estrechas del Casco son cañones, los paseos con edificios altos quedan en 0,3-0,35 y la
+ribera y los parques son abiertos. Un tramo de la Calle Mayor alineado con el cierzo (123°, apertura
+0) da 49,9 de exposición con 30 km/h desde 300°: el cañón canaliza el viento a lo largo.
+
+En las rutas, con un cierzo de 50 km/h en cinco trayectos de prueba, la apertura sube la exposición
+(por ejemplo, de 27 a 56 en Universidad → Romareda, una zona abierta) y aumenta algo la diferencia
+entre alternativas (hasta 12 puntos en Delicias → Pilar, donde la alternativa va por calles más
+abiertas). Las alternativas de ORS siguen pareciéndose, así que la ruta rápida sigue ganando a
+menudo (ADR-025).
 
 ## Autenticación (PBI-4)
 
@@ -948,6 +1014,21 @@ códigos controlados que `/api/routes/fastest`; si el cálculo de sombras supera
 pero no añade migraciones ni dependencias.
 
 ## Checklist de verificación manual
+
+### PBI-8.3 - Apertura de la calle en la exposición al viento
+
+Con las calles y los edificios importados (`npm run import:streets` e `import:buildings`) y la
+migración aplicada.
+
+- [ ] `npm run compute:openness` termina con `status=success` y tantos `segments` como
+      `street_segments`.
+- [ ] `GET /api/segments/<id>/wind-exposure?windSpeed=30&windDirection=300` del Paseo de la
+      Independencia (`399096155:2`) → `openness` ≈ 0,2, `street.widthM` ≈ 51 y `windExposure` ≈ 10.
+- [ ] Un tramo de la Calle Mayor → `openness` 0 y, con viento perpendicular a la calle, exposición ≈ 0.
+- [ ] Un camino del Parque Grande o del Paseo de Echegaray y Caballero → `openness` ≈ 1 y, con viento
+      perpendicular, exposición ≈ 50 con 50 km/h.
+- [ ] Antes de lanzar `compute:openness` (o con un tramo nuevo), `street` es `null` y `openness` 1.
+- [ ] `npm run ci` y `npm run test:integration -- src/tests/integration/openness.test.js` pasan.
 
 ### PBI-10 (fase A) - Índice de vegetación por tramo
 

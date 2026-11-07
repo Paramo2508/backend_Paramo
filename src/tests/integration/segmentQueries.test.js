@@ -332,6 +332,12 @@ describe('segment queries and data status API (PostGIS)', () => {
   describe('GET /api/segments/:id/wind-exposure', () => {
     // S1 runs west-east and S2 south-north; the grid north of EPSG:25830 is ~1° off true north.
     it('scores an aligned segment near 100 and a perpendicular one near 0', async () => {
+      // Narrow streets (PBI-8.3): only the wind along them counts, as in PBI-8.1.
+      await sequelize.query(
+        `INSERT INTO segment_openness (segment_id, samples, width_m, height_m, hw_ratio, openness)
+         VALUES (:s1, 5, 10, 20, 2, 0), (:s2, 5, 10, 20, 2, 0)`,
+        { replacements: { s1: ids.S1, s2: ids.S2 } }
+      );
       const wind = '?windSpeed=50&windDirection=90';
       const aligned = await get(`/api/segments/${ids.S1}/wind-exposure${wind}`);
       const perpendicular = await get(`/api/segments/${ids.S2}/wind-exposure${wind}`);
@@ -349,6 +355,19 @@ describe('segment queries and data status API (PostGIS)', () => {
       expect(aligned.body.windExposure).toBeGreaterThan(99);
       expect(Math.abs(perpendicular.body.orientationDeg % 180)).toBeLessThan(2);
       expect(perpendicular.body.windExposure).toBeLessThan(3);
+      expect(perpendicular.body).toMatchObject({
+        openness: 0,
+        street: { widthM: 10, heightM: 20, hwRatio: 2, samples: 5 }
+      });
+    });
+
+    it('treats a segment without computed openness as open (PBI-8.3)', async () => {
+      const response = await get(
+        `/api/segments/${ids.S2}/wind-exposure?windSpeed=50&windDirection=90`
+      );
+
+      expect(response.body).toMatchObject({ openness: 1, street: null });
+      expect(Math.abs(response.body.windExposure - 50)).toBeLessThan(3);
     });
 
     it('returns 404 for a segment that does not exist', async () => {

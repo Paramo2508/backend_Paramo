@@ -1,4 +1,5 @@
 const { httpError } = require('../../utils/httpError');
+const { withCrosswind } = require('./streetOpenness');
 const { windIntensity } = require('./windExposure');
 
 // Wind from behind bothers less than in the face (ADR-025). Provisional, like the thresholds.
@@ -34,43 +35,67 @@ function routePieces(geometry) {
       ) +
         360) %
       360;
-    if (Number.isFinite(lengthM) && lengthM > 0) pieces.push({ bearingDeg, lengthM });
+    if (Number.isFinite(lengthM) && lengthM > 0) {
+      const midpoint = [
+        (coordinates[index - 1][0] + coordinates[index][0]) / 2,
+        (coordinates[index - 1][1] + coordinates[index][1]) / 2
+      ];
+      pieces.push({ bearingDeg, lengthM, midpoint });
+    }
   }
   return pieces;
 }
 
 /*
  * How much a piece walked in bearingDeg faces a wind coming from windDirectionDeg: 1 in the face,
- * TAILWIND_FACTOR from behind and 0 across, like the |cos| of PBI-8.1 but with the walking direction.
+ * TAILWIND_FACTOR from behind and 0 across, like the |cos| of PBI-8.1 but with the walking
+ * direction. With the openness of the street (PBI-8.3) the wind across it also counts.
  */
-function directionalAlignment(bearingDeg, windDirectionDeg) {
-  const cosine = Math.cos(toRadians(windDirectionDeg - bearingDeg));
-  return cosine >= 0 ? cosine : -cosine * TAILWIND_FACTOR;
+function directionalAlignment(bearingDeg, windDirectionDeg, openness = 0) {
+  const angleDeg = windDirectionDeg - bearingDeg;
+  const cosine = Math.cos(toRadians(angleDeg));
+  const along = cosine >= 0 ? cosine : -cosine * TAILWIND_FACTOR;
+  return withCrosswind(along, angleDeg, openness);
 }
 
 function unavailableRouteWindExposure(reason) {
-  return { status: 'unavailable', reason, exposure: null, alignment: null, intensity: null };
+  return {
+    status: 'unavailable',
+    reason,
+    exposure: null,
+    alignment: null,
+    intensity: null,
+    openness: null
+  };
 }
 
-// Length-weighted wind exposure (0-100) of a route walked from its first to its last point.
-function calculateRouteWindExposure(route, { speedKmh, directionDeg }) {
-  const pieces = routePieces(route?.geometry);
+/*
+ * Length-weighted wind exposure (0-100) of a route walked from its first to its last point. Each
+ * piece may carry the openness of its street (PBI-8.3); without one it counts as a canyon, the
+ * model of PBI-8.2. openness is the length-weighted mean of the pieces.
+ */
+function calculatePiecesWindExposure(pieces, { speedKmh, directionDeg }) {
   const totalM = pieces.reduce((sum, piece) => sum + piece.lengthM, 0);
   if (totalM <= 0) return unavailableRouteWindExposure('invalid_route_geometry');
 
-  const alignment =
-    pieces.reduce(
-      (sum, piece) => sum + piece.lengthM * directionalAlignment(piece.bearingDeg, directionDeg),
-      0
-    ) / totalM;
+  const weighted = (value) =>
+    pieces.reduce((sum, piece) => sum + piece.lengthM * value(piece), 0) / totalM;
+  const alignment = weighted((piece) =>
+    directionalAlignment(piece.bearingDeg, directionDeg, piece.openness)
+  );
   const intensity = windIntensity(speedKmh);
   return {
     status: 'available',
     reason: null,
     exposure: 100 * alignment * intensity,
     alignment,
-    intensity
+    intensity,
+    openness: weighted((piece) => (Number.isFinite(piece.openness) ? piece.openness : 0))
   };
+}
+
+function calculateRouteWindExposure(route, wind) {
+  return calculatePiecesWindExposure(routePieces(route?.geometry), wind);
 }
 
 // Optional wind of a route request: { speedKmh, directionDeg }, both numbers.
@@ -91,6 +116,7 @@ function parseRouteWind(wind) {
 
 module.exports = {
   TAILWIND_FACTOR,
+  calculatePiecesWindExposure,
   calculateRouteWindExposure,
   directionalAlignment,
   parseRouteWind,
