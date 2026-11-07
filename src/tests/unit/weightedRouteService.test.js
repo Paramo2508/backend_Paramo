@@ -32,8 +32,10 @@ describe('weighted route service', () => {
   const solarCalculator = jest.fn();
   const fastestRouteCalculator = jest.fn();
   const weather = jest.fn();
+  const findOpennessNearPoints = jest.fn();
   const dependencies = {
     weather,
+    opennessRepository: { findOpennessNearPoints },
     alternativesProvider: routesProvider,
     routeSegmentRepository: { findSegmentsForRoutes },
     exposureCalculator,
@@ -46,6 +48,8 @@ describe('weighted route service', () => {
     solarCalculator.mockReturnValue(solarPosition);
     // Calm by default: the wind does not change the PBI-6 cases.
     weather.mockResolvedValue({ windSpeed: 5, windDirection: 0, time: '2026-06-21T14:00' });
+    // Canyons by default: the model of PBI-8.2, only the wind along the streets counts.
+    findOpennessNearPoints.mockImplementation(async (points) => points.map(() => 0));
     // A sunny fastest route and a shaded alternative 10 % longer.
     routesProvider.mockResolvedValue([
       { geometry: geometry(), distance: 1000, duration: 600 },
@@ -297,6 +301,55 @@ describe('weighted route service', () => {
       ).rejects.toMatchObject({ status: 400 });
       expect(routesProvider).not.toHaveBeenCalled();
       expect(weather).not.toHaveBeenCalled();
+    });
+
+    it('counts the crosswind in open streets (PBI-8.3)', async () => {
+      const crosswind = { speedKmh: 50, directionDeg: 90 };
+      const inCanyons = await calculateWeightedRouteComparison(
+        { ...input, weights: { wind: 100 }, wind: crosswind },
+        dependencies
+      );
+      findOpennessNearPoints.mockImplementation(async (points) => points.map(() => 1));
+      const inTheOpen = await calculateWeightedRouteComparison(
+        { ...input, weights: { wind: 100 }, wind: crosswind },
+        dependencies
+      );
+
+      expect(inCanyons.fastest.windExposure.exposure).toBeCloseTo(0, 1);
+      expect(inTheOpen.fastest.windExposure).toMatchObject({ openness: 1 });
+      expect(inTheOpen.fastest.windExposure.exposure).toBeCloseTo(50);
+    });
+
+    it('treats pieces without a nearby street as open', async () => {
+      findOpennessNearPoints.mockImplementation(async (points) => points.map(() => null));
+
+      const result = await calculateWeightedRouteComparison(
+        { ...input, weights: { wind: 100 }, wind: { speedKmh: 50, directionDeg: 90 } },
+        dependencies
+      );
+
+      expect(result.fastest.windExposure.openness).toBe(1);
+    });
+
+    it('asks for the openness of every piece of every route in one query', async () => {
+      await calculateWeightedRouteComparison(
+        { ...input, weights: { wind: 100 }, wind: northWind },
+        dependencies
+      );
+
+      expect(findOpennessNearPoints).toHaveBeenCalledTimes(1);
+      // One piece in the fastest route and two in the alternative.
+      expect(findOpennessNearPoints.mock.calls[0][0]).toHaveLength(3);
+      expect(findOpennessNearPoints.mock.calls[0][1]).toBe(10);
+    });
+
+    it('does not look for the openness with calm wind', async () => {
+      await calculateWeightedRouteComparison(
+        { ...input, weights: { wind: 100 }, wind: { speedKmh: 5, directionDeg: 0 } },
+        dependencies
+      );
+
+      expect(findOpennessNearPoints).not.toHaveBeenCalled();
     });
   });
 });

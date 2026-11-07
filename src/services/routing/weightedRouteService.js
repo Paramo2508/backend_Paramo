@@ -10,14 +10,21 @@ const {
   selectWeightedRoute
 } = require('../../domain/routes/weightedRouteSelection');
 const {
-  calculateRouteWindExposure,
+  calculatePiecesWindExposure,
   parseRouteWind,
+  routePieces,
   unavailableRouteWindExposure
 } = require('../../domain/wind/routeWindExposure');
+const { DEFAULT_OPENNESS } = require('../../domain/wind/streetOpenness');
+const { windIntensity } = require('../../domain/wind/windExposure');
 const {
   getAlternativeWalkingRoutes
 } = require('../../integrations/openRouteService/directionsClient');
+const defaultOpenness = require('../../repositories/opennessRepository');
 const { getZaragozaWeather } = require('../weather/weatherService');
+
+// How far the street segment of each piece of a route is searched for its openness (ADR-028).
+const OPENNESS_SEARCH_M = 10;
 const { calculateFastestRoute } = require('./fastestRouteService');
 const { evaluateRouteCandidates } = require('./routeCandidates');
 
@@ -48,13 +55,36 @@ async function resolveWind(requested, weights, weather) {
   }
 }
 
-const withWindExposure = (route, wind) =>
-  route && {
-    ...route,
-    windExposure: wind
-      ? calculateRouteWindExposure(route, wind)
-      : unavailableRouteWindExposure('weather_unavailable')
-  };
+/*
+ * Each route with its wind exposure. Every straight piece takes the openness of the nearest street
+ * segment (PBI-8.3), all in one query; with calm wind the exposure is 0 anyway and it is skipped.
+ */
+async function withWindExposures(routes, wind, opennessRepository) {
+  if (!wind) {
+    return routes.map((route) => ({
+      ...route,
+      windExposure: unavailableRouteWindExposure('weather_unavailable')
+    }));
+  }
+  const piecesByRoute = routes.map((route) => routePieces(route.geometry));
+  const allPieces = piecesByRoute.flat();
+  const openness =
+    windIntensity(wind.speedKmh) > 0
+      ? await opennessRepository.findOpennessNearPoints(
+          allPieces.map((piece) => piece.midpoint),
+          OPENNESS_SEARCH_M
+        )
+      : [];
+  let offset = 0;
+  return routes.map((route, index) => {
+    const pieces = piecesByRoute[index].map((piece, pieceIndex) => ({
+      ...piece,
+      openness: openness.length ? (openness[offset + pieceIndex] ?? DEFAULT_OPENNESS) : undefined
+    }));
+    offset += pieces.length;
+    return { ...route, windExposure: calculatePiecesWindExposure(pieces, wind) };
+  });
+}
 
 /**
  * The fastest route and, if one of the ORS alternatives suits the weights better, that one
@@ -67,6 +97,7 @@ async function calculateWeightedRouteComparison(
     fastestRouteCalculator = calculateFastestRoute,
     alternativesProvider = getAlternativeWalkingRoutes,
     weather = getZaragozaWeather,
+    opennessRepository = defaultOpenness,
     ...dependencies
   } = {}
 ) {
@@ -86,7 +117,7 @@ async function calculateWeightedRouteComparison(
       status: 'fastest_only',
       weights,
       wind,
-      fastest: withWindExposure(fastest, wind),
+      fastest: (await withWindExposures([fastest], wind, opennessRepository))[0],
       selected: null,
       additionalDurationSeconds: null,
       shadeChangePercentagePoints: null,
@@ -103,7 +134,7 @@ async function calculateWeightedRouteComparison(
     ...dependencies
   });
   const selection = selectWeightedRoute(
-    routes.map((route) => withWindExposure(route, wind)),
+    await withWindExposures(routes, wind, opennessRepository),
     weights,
     { maxDurationFactor }
   );

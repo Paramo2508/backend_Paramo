@@ -80,7 +80,8 @@ describe('calculateRouteWindExposure', () => {
       reason: 'invalid_route_geometry',
       exposure: null,
       alignment: null,
-      intensity: null
+      intensity: null,
+      openness: null
     });
   });
 });

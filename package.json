@@ -24,6 +24,7 @@
     "import:all": "node src/integrations/importAll.js",
     "associate": "node src/cli/associate.js",
     "compute:vegetation": "node src/cli/computeVegetation.js",
+    "compute:openness": "node src/cli/computeOpenness.js",
     "test:integration": "jest --config jest.integration.config.js --coverage",
     "test:all": "jest --config jest.all.config.js --coverage"
   },
