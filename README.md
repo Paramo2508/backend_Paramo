@@ -896,6 +896,49 @@ nombres distintos). Lo decide el índice único `route_profiles_user_name_idx`
 
 Responde `204`. Borra la ruta solo para ese usuario, también si es predefinida.
 
+## Historial y favoritos (PBI-12)
+
+Cada usuario tiene sus **10 últimas búsquedas** de ruta y hasta **20 trayectos favoritos**, con los
+puntos y el nombre que vio de cada uno (ADR-032, en DECISIONS.md de la carpeta docs del Drive del
+equipo). El frontend apunta la búsqueda cuando una ruta se calcula bien. Son ubicaciones personales:
+se borran con el usuario (`ON DELETE CASCADE`) y el historial nunca guarda más de 10. Tablas
+`route_searches` y `route_favorites` (migración `20261114000001-create-route-history-and-favorites`).
+
+Los puntos se validan como en las rutas (coordenadas válidas y dentro de Zaragoza) y se redondean a 5
+decimales (~1 m): el mismo trayecto buscado otra vez sube arriba con los nombres nuevos en vez de
+repetirse, y el mismo trayecto no puede estar dos veces en favoritos. Todo exige sesión y cada
+usuario solo ve y borra lo suyo.
+
+### `GET /api/route-history` y `POST /api/route-history`
+
+`POST` con `{ "origin": { "lat", "lng", "label" }, "destination": { ... } }` (`label` opcional, hasta
+200 caracteres) responde `201`. Respuesta real (2026-11-14):
+
+```json
+{ "search": { "id": 4, "origin": { "lat": 41.6572, "lng": -0.88039, "label": "Plaza del Pilar" }, "destination": { "lat": 41.64886, "lng": -0.87933, "label": "Plaza de los Sitios" }, "searchedAt": "2026-11-14T20:59:18.152Z" } }
+```
+
+`GET` devuelve `{ "searches": [...] }`, de la más reciente a la más antigua. Un punto fuera de
+Zaragoza → `400` con `{ "message": "El origen y el destino tienen que estar en Zaragoza.", "fields":
+{ "origin": "Fuera de Zaragoza." } }`.
+
+### `DELETE /api/route-history`
+
+Responde `204`. Borra todo el historial del usuario; los favoritos se mantienen.
+
+### `GET /api/route-favorites` y `POST /api/route-favorites`
+
+`POST` con el mismo cuerpo y un `name` opcional (hasta 60 caracteres). Sin nombre se usa
+"Origen → Destino" con la primera parte de cada lugar ("Plaza del Pilar → Plaza de los Sitios").
+Responde `201` con `{ "favorite": { "id", "name", "origin", "destination", "createdAt" } }`; `GET`
+devuelve `{ "favorites": [...] }` en el orden en que se guardaron. Errores: `400` (nombre o puntos no
+válidos) y `409` ("Ese trayecto ya está en tus favoritos." o "Puedes guardar como máximo 20
+favoritos.").
+
+### `DELETE /api/route-favorites/:id`
+
+Responde `204`, o `404` si el favorito no existe o es de otro usuario.
+
 ### `POST /api/routes/weighted`
 
 El mismo cuerpo que `POST /api/routes/shaded` más `"weights": { "shade": 80, "sun": 0, "wind": 0 }`
@@ -1203,6 +1246,23 @@ códigos controlados que `/api/routes/fastest`; si el cálculo de sombras supera
 pero no añade migraciones ni dependencias.
 
 ## Checklist de verificación manual
+
+### Historial y favoritos (PBI-12)
+
+Con la migración aplicada (`npm run db:migrate`), el servidor arrancado y `$h` como en la checklist
+de la PBI-9.1.
+
+- [ ] `npm run db:migrate` crea `route_searches` y `route_favorites`; `npm run db:migrate:undo` las
+      borra y se puede volver a aplicar.
+- [ ] `POST /api/route-history` con dos puntos de Zaragoza → `201`; repetirlo no crea otra fila (sube
+      arriba en `GET /api/route-history`) y con 11 trayectos distintos solo quedan los 10 últimos.
+- [ ] Un punto fuera de Zaragoza (p. ej. Madrid, `40.4168, -3.7038`) → `400` "Fuera de Zaragoza.".
+- [ ] `DELETE /api/route-history` → `204` y el historial queda vacío; los favoritos siguen.
+- [ ] `POST /api/route-favorites` sin `name` → nombre "Origen → Destino"; el mismo trayecto otra vez
+      → `409`; `DELETE /api/route-favorites/:id` de otro usuario → `404`.
+- [ ] Sin sesión, cualquiera de los endpoints → `401`.
+- [ ] `npm run ci` y `npm run test:all` pasan (`routeTrips.test.js`, `routeHistoryService.test.js`,
+      `routeHistory.test.js` y la integración `routeHistory.test.js`).
 
 ### Nombres de ruta repetidos (#165)
 

@@ -104,6 +104,36 @@ const RouteProfile = sequelize.define(
   { underscored: true, timestamps: true, tableName: 'route_profiles' }
 );
 
+const tripColumns = {
+  userId: { type: DataTypes.INTEGER, allowNull: false },
+  originLat: { type: DataTypes.DOUBLE, allowNull: false },
+  originLng: { type: DataTypes.DOUBLE, allowNull: false },
+  originLabel: DataTypes.STRING(200),
+  destinationLat: { type: DataTypes.DOUBLE, allowNull: false },
+  destinationLng: { type: DataTypes.DOUBLE, allowNull: false },
+  destinationLabel: DataTypes.STRING(200)
+};
+
+// PBI-12: last route searches and favourite trips of each user.
+const RouteSearch = sequelize.define(
+  'RouteSearch',
+  {
+    ...tripColumns,
+    searchedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }
+  },
+  { ...options, tableName: 'route_searches' }
+);
+
+const RouteFavorite = sequelize.define(
+  'RouteFavorite',
+  {
+    ...tripColumns,
+    name: { type: DataTypes.STRING(60), allowNull: false },
+    createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }
+  },
+  { ...options, tableName: 'route_favorites' }
+);
+
 ImportRun.hasMany(ImportRejection, { foreignKey: 'importRunId' });
 ImportRejection.belongsTo(ImportRun, { foreignKey: 'importRunId' });
 
@@ -115,5 +145,7 @@ module.exports = {
   Tree,
   StreetSegment,
   User,
-  RouteProfile
+  RouteProfile,
+  RouteSearch,
+  RouteFavorite
 };
