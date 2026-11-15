@@ -1,4 +1,5 @@
 const { calculateFastestRoute } = require('../../services/routing/fastestRouteService');
+const { adjustRouteWithAssistant } = require('../../services/routing/routeAssistantService');
 const { calculateRecommendedRoute } = require('../../services/routing/recommendedRouteService');
 const { calculateShadedRouteComparison } = require('../../services/routing/shadedRouteService');
 const { calculateWeightedRouteComparison } = require('../../services/routing/weightedRouteService');
@@ -40,4 +41,19 @@ async function postRecommendedRoute(req, res, next) {
   }
 }
 
-module.exports = { postFastestRoute, postRecommendedRoute, postShadedRoute, postWeightedRoute };
+// Route assistant (PBI-9.2): a language model turns the request into weights (ADR-033).
+async function postAssistantRoute(req, res, next) {
+  try {
+    res.status(200).json(await adjustRouteWithAssistant(req.body, { userId: req.userId }));
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = {
+  postAssistantRoute,
+  postFastestRoute,
+  postRecommendedRoute,
+  postShadedRoute,
+  postWeightedRoute
+};
