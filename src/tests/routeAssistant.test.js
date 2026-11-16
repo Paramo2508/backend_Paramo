@@ -405,6 +405,16 @@ describe('POST /api/routes/assistant', () => {
       expectNotice(await post(body()), 'not_configured');
       expect(llmClient.completeJson).not.toHaveBeenCalled();
     });
+
+    it('the notices speak of the assistant by its name, Cierzo (#181)', () => {
+      expect(NOTICES.not_configured).toBe(
+        'Cierzo no está disponible en este servidor. Puedes ajustar la ruta a mano.'
+      );
+      expect(NOTICES.timeout).toMatch(/^Cierzo ha tardado demasiado\./);
+      expect(NOTICES.model_error).toMatch(/^Cierzo no ha podido responder\./);
+      expect(NOTICES.provider_busy).toMatch(/^Cierzo está muy solicitado/);
+      expect(Object.values(NOTICES).join(' ')).not.toMatch(/asistente/i);
+    });
   });
 
   describe('usage limits', () => {
@@ -418,7 +428,7 @@ describe('POST /api/routes/assistant', () => {
 
       expect(response.status).toBe(429);
       expect(response.body.error.message).toBe(
-        'Has hecho muchas peticiones seguidas al asistente. Espera un minuto.'
+        'Has hecho muchas peticiones seguidas a Cierzo. Espera un minuto.'
       );
       expect(Number(response.headers['retry-after'])).toBeGreaterThan(0);
       expect(llmClient.completeJson).toHaveBeenCalledTimes(3);
