@@ -40,4 +40,9 @@ const env = {
     process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5173/api/auth/google/callback'
 };
 
+// Each environment has its own OpenRouteService key (#160): development in the local .env, production
+// in /opt/weathermapz/.env. Tests never use a real one, even if the local .env has it: the tests that
+// need a key set a fake one themselves.
+if (nodeEnv === 'test') env.openRouteServiceApiKey = '';
+
 module.exports = { env };
