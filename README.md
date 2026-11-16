@@ -512,6 +512,14 @@ para crearlo están en [deploy/README.md](deploy/README.md).
 - `ORS_API_KEY`: clave de API de OpenRouteService / HeiGIT que usan el autocompletado y el cálculo
   de rutas. Guárdala solo en el `backend/.env` ignorado por Git o en el entorno del servidor.
   `OPENROUTESERVICE_API_KEY` sigue funcionando como alternativa para configuraciones antiguas.
+  Cada entorno tiene su propia clave (#160), con el mismo nombre de variable: la de **desarrollo** en
+  el `backend/.env` local y la de **producción** solo en `/opt/weathermapz/.env` del servidor (ver
+  [deploy/README.md](deploy/README.md#cambiar-la-clave-de-openrouteservice)), para que el consumo de
+  uno no gaste la cuota del otro. Con `NODE_ENV=test` el backend ignora las dos variables: los tests
+  ponen una clave falsa cuando la necesitan y nunca usan una real, aunque esté en el `.env`. En
+  producción, si falta, el backend arranca igual y escribe en el log el aviso
+  `ORS_API_KEY is not set`; `/api/health` sigue respondiendo y la búsqueda de lugares y las rutas
+  responden `503`.
 - `OPENROUTESERVICE_GEOCODING_BASE_URL`: URL base de la API de geocodificación. Valor local por defecto: `https://api.heigit.org/pelias/v1`.
 - `OPENROUTESERVICE_DIRECTIONS_BASE_URL`: URL base de la API de rutas. Valor local por defecto:
   `https://api.openrouteservice.org/v2/directions`.

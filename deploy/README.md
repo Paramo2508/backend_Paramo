@@ -105,6 +105,11 @@ Rellena `DOMAIN`, `DB_PASSWORD` y `JWT_SECRET` (genera ambos con `openssl rand -
 `BACKEND_IMAGE` y `FRONTEND_IMAGE` deben ser el nombre de cada repositorio de la organización en
 minúsculas.
 
+`ORS_API_KEY` es la clave de OpenRouteService **de producción**, distinta de la de desarrollo que
+cada uno tiene en su `backend/.env` local (#160). Solo vive en este `.env` del servidor: no va en
+Git ni en los secretos de GitHub Actions, porque el workflow no la necesita (los tests usan
+OpenRouteService simulado).
+
 ## 3. Configurar GitHub (en los dos repositorios de la organización)
 
 En **Settings → Secrets and variables → Actions**, a nivel de **repositorio** (no de entorno: el
@@ -183,6 +188,26 @@ docker compose exec db pg_dump -U weathermapz weathermapz | gzip > backup-$(date
 **Volver a una versión anterior.** Cada imagen también se publica con el SHA del commit. Pon
 `BACKEND_TAG=<sha>` (o `FRONTEND_TAG`) en `.env` y ejecuta `docker compose up -d backend`. Quita la
 línea antes del siguiente despliegue normal. Las migraciones no se deshacen solas.
+
+### Cambiar la clave de OpenRouteService
+
+La clave de producción (#160) se crea en el dashboard de
+[openrouteservice.org](https://openrouteservice.org/dev/#/home) con un nombre que la distinga de la
+de desarrollo (por ejemplo `weathermapz-prod` y `weathermapz-dev`) y se pasa a quien gestione el
+servidor por un canal privado, nunca por Git ni por el chat del equipo. Para ponerla o cambiarla:
+
+```bash
+ssh -t azureuser@<DOMAIN> 'sudo nano /opt/weathermapz/.env'   # ORS_API_KEY=<clave de producción>
+ssh azureuser@<DOMAIN>
+sudo -iu deploy
+cd /opt/weathermapz
+docker compose up -d --force-recreate backend   # el contenedor vuelve a leer el .env
+docker compose logs --since 2m backend          # no debe aparecer "ORS_API_KEY is not set"
+```
+
+Comprueba después que la búsqueda de lugares de `https://<DOMAIN>` sugiere direcciones. Si la clave
+falta, el backend arranca igual, escribe ese aviso en el log, `/api/health` responde y la búsqueda
+de lugares y las rutas responden `503`.
 
 **Crédito.** Consulta el saldo en el portal (busca "Education") o en
 `microsoftazuresponsorships.com/balance`. Si se acaba, otra persona del equipo puede activar su
