@@ -430,6 +430,20 @@ Estas cifras incluyen `src/tests/integration/shadows.test.js`, que ejecuta la pr
 asociación de sombras de PBI-5.2 contra PostGIS. Pueden variar al añadir código o pruebas; el
 resultado vigente debe comprobarse volviendo a ejecutar el comando.
 
+El informe de cobertura cuenta solo el código de producción: `jest.config.js` excluye `src/tests`
+(tests, fixtures y `globalSetup.js` de integración) y los otros dos ficheros de configuración de
+Jest heredan esa lista. Antes de excluirlo, `npm test` contaba los 10 tests de integración y su
+`globalSetup.js` (que no ejecuta) como código sin cubrir. Medido el 2026-11-16 (sentencias, ramas,
+funciones y líneas):
+
+| Comando | Antes | Después |
+| --- | --- | --- |
+| `npm test` (lo que ejecuta el CI) | 66,37 / 84,21 / 58,02 / 65,83 % | 88,98 / 84,32 / 78,06 / 89,23 % |
+| `npm run test:integration` | 25,06 / 32,36 / 19,65 / 25,41 % | 55,28 / 33,87 / 50,43 / 57,28 % |
+| `npm run test:all` | 98,27 / 93,09 / 97,92 / 98,67 % | 98,27 / 93,09 / 97,92 / 98,67 % |
+
+`test:all` no cambia porque ejecuta todos los tests y Jest ya excluía su `globalSetup`.
+
 ## Comprobaciones
 
 ```bash
