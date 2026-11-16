@@ -1,5 +1,6 @@
 const request = require('supertest');
 
+const { createApp } = require('../../app');
 const { warnAboutMissingSettings } = require('../../config/startupChecks');
 
 // One OpenRouteService key per environment (#160): tests never use the key of the environment, and
@@ -63,21 +64,20 @@ describe('OpenRouteService key by environment', () => {
       expect(warningsFor({ nodeEnv: 'test', openRouteServiceApiKey: '' })).toEqual([]);
     });
 
+    // The app is loaded once at the top of the file, as in health.test.js: loading it again inside
+    // the test (jest.isolateModules) took about 1 s and went over the 5 s timeout on a busy machine.
+    // createApp() reads neither NODE_ENV nor the key, so production is given to the check instead.
     it('keeps /api/health answering in production without the key', async () => {
-      process.env = { ...originalEnv, NODE_ENV: 'production', ORS_API_KEY: '' };
-      let app;
-      let checks;
-      jest.isolateModules(() => {
-        /* eslint-disable global-require */
-        checks = require('../../config/startupChecks');
-        app = require('../../app').createApp();
-        /* eslint-enable global-require */
-      });
       const logger = { warn: jest.fn() };
 
-      expect(() => checks.warnAboutMissingSettings({ logger })).not.toThrow();
+      expect(() =>
+        warnAboutMissingSettings({
+          env: { nodeEnv: 'production', openRouteServiceApiKey: '' },
+          logger
+        })
+      ).not.toThrow();
       expect(logger.warn).toHaveBeenCalledTimes(1);
-      const response = await request(app).get('/api/health');
+      const response = await request(createApp()).get('/api/health');
       expect(response.status).toBe(200);
       expect(response.body.status).toBe('ok');
     });
