@@ -1,6 +1,8 @@
 const coverageExclusions = [
   '!src/server.js',
   '!src/config/**',
+  // Test code (helpers such as the integration globalSetup) is not production code (#162).
+  '!src/tests/**',
   '!src/repositories/migrations/**',
   '!src/integrations/importAll.js'
 ];

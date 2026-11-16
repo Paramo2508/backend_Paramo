@@ -185,6 +185,13 @@ docker compose exec db psql -U weathermapz      # consola SQL
 docker compose exec db pg_dump -U weathermapz weathermapz | gzip > backup-$(date +%F).sql.gz
 ```
 
+**Host de OpenRouteService.** Desde #160 (cambio a `api.heigit.org`) el backend usa por defecto
+`https://api.heigit.org/openrouteservice/v2/directions` y `https://api.heigit.org/pelias/v1`; el
+host antiguo `api.openrouteservice.org` está obsoleto y con una décima parte de la cuota. No hay
+que tocar `/opt/weathermapz/.env`, salvo que alguien haya puesto a mano
+`OPENROUTESERVICE_DIRECTIONS_BASE_URL` o `OPENROUTESERVICE_GEOCODING_BASE_URL` con el host antiguo:
+en ese caso, borra esas líneas y ejecuta `docker compose up -d --force-recreate backend`.
+
 **Volver a una versión anterior.** Cada imagen también se publica con el SHA del commit. Pon
 `BACKEND_TAG=<sha>` (o `FRONTEND_TAG`) en `.env` y ejecuta `docker compose up -d backend`. Quita la
 línea antes del siguiente despliegue normal. Las migraciones no se deshacen solas.
