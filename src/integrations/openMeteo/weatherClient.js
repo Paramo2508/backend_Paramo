@@ -1,9 +1,10 @@
-const OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast';
+const { env } = require('../../config/env');
+
 const REQUEST_TIMEOUT_MS = 8000;
 const ZARAGOZA = { latitude: 41.6488, longitude: -0.8891 };
 
 async function getCurrentWeather() {
-  const url = new URL(OPEN_METEO_URL);
+  const url = new URL(`${env.openMeteoBaseUrl.replace(/\/$/, '')}/forecast`);
   url.searchParams.set('latitude', String(ZARAGOZA.latitude));
   url.searchParams.set('longitude', String(ZARAGOZA.longitude));
   // Apparent temperature and gusts are optional: the recommended route (PBI-9.1, ADR-029) uses them

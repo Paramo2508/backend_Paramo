@@ -69,4 +69,47 @@ describe('GET /api/weather/current', () => {
     expect(response.status).toBe(502);
     expect(response.body.error.message).toMatch(/weather provider/i);
   });
+
+  it('calls the Open-Meteo base URL of OPEN_METEO_BASE_URL when it is set (#161)', async () => {
+    // eslint-disable-next-line global-require
+    const { env } = require('../config/env');
+    const originalBaseUrl = env.openMeteoBaseUrl;
+    env.openMeteoBaseUrl = 'http://127.0.0.1:4010/open-meteo/v1/';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        timezone: 'Europe/Madrid',
+        current: {
+          temperature_2m: 20,
+          wind_speed_10m: 5,
+          wind_direction_10m: 180,
+          weather_code: 0,
+          time: '2026-11-16T12:00'
+        }
+      })
+    });
+
+    try {
+      const response = await request(createApp()).get('/api/weather/current');
+
+      expect(response.status).toBe(200);
+      const url = new URL(global.fetch.mock.calls[0][0]);
+      expect(url.origin + url.pathname).toBe('http://127.0.0.1:4010/open-meteo/v1/forecast');
+    } finally {
+      env.openMeteoBaseUrl = originalBaseUrl;
+    }
+  });
+
+  it('defaults to the public Open-Meteo API', () => {
+    const originalValue = process.env.OPEN_METEO_BASE_URL;
+    delete process.env.OPEN_METEO_BASE_URL;
+    let loaded;
+    jest.isolateModules(() => {
+      // eslint-disable-next-line global-require
+      loaded = require('../config/env').env;
+    });
+    if (originalValue !== undefined) process.env.OPEN_METEO_BASE_URL = originalValue;
+
+    expect(loaded.openMeteoBaseUrl).toBe('https://api.open-meteo.com/v1');
+  });
 });

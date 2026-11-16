@@ -534,6 +534,9 @@ para crearlo están en [deploy/README.md](deploy/README.md).
   con la misma clave y las mismas peticiones. El 16-11-2026 el host antiguo respondía con un límite
   de 200 rutas al día y el nuevo con 2000. Si un `.env` define esta variable con el host antiguo,
   cámbiala.
+- `OPEN_METEO_BASE_URL` (opcional): URL base de Open-Meteo. Valor por defecto:
+  `https://api.open-meteo.com/v1`. El test de extremo a extremo del frontend (#161) la apunta a un
+  servidor falso para no llamar al servicio real.
 - `JWT_SECRET` (**obligatoria y secreta**): clave con la que se firman los tokens de sesión. Debe
   ser larga y aleatoria; se puede generar con
   `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Sin ella, el

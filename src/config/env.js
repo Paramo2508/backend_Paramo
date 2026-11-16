@@ -27,6 +27,8 @@ const env = {
   openRouteServiceDirectionsBaseUrl:
     process.env.OPENROUTESERVICE_DIRECTIONS_BASE_URL ||
     'https://api.heigit.org/openrouteservice/v2/directions',
+  // Optional (#161): the end-to-end tests point it to a fake server.
+  openMeteoBaseUrl: process.env.OPEN_METEO_BASE_URL || 'https://api.open-meteo.com/v1',
   databaseUrl: nodeEnv === 'test' ? testDatabaseUrl : developmentDatabaseUrl,
   testDatabaseUrl,
   jwtSecret: process.env.JWT_SECRET || '',
