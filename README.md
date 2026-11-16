@@ -515,6 +515,9 @@ para crearlo están en [deploy/README.md](deploy/README.md).
 - `OPENROUTESERVICE_GEOCODING_BASE_URL`: URL base de la API de geocodificación. Valor local por defecto: `https://api.heigit.org/pelias/v1`.
 - `OPENROUTESERVICE_DIRECTIONS_BASE_URL`: URL base de la API de rutas. Valor local por defecto:
   `https://api.openrouteservice.org/v2/directions`.
+- `OPEN_METEO_BASE_URL` (opcional): URL base de Open-Meteo. Valor por defecto:
+  `https://api.open-meteo.com/v1`. El test de extremo a extremo del frontend (#161) la apunta a un
+  servidor falso para no llamar al servicio real.
 - `JWT_SECRET` (**obligatoria y secreta**): clave con la que se firman los tokens de sesión. Debe
   ser larga y aleatoria; se puede generar con
   `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Sin ella, el
