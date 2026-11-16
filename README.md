@@ -430,6 +430,20 @@ Estas cifras incluyen `src/tests/integration/shadows.test.js`, que ejecuta la pr
 asociación de sombras de PBI-5.2 contra PostGIS. Pueden variar al añadir código o pruebas; el
 resultado vigente debe comprobarse volviendo a ejecutar el comando.
 
+El informe de cobertura cuenta solo el código de producción: `jest.config.js` excluye `src/tests`
+(tests, fixtures y `globalSetup.js` de integración) y los otros dos ficheros de configuración de
+Jest heredan esa lista. Antes de excluirlo, `npm test` contaba los 10 tests de integración y su
+`globalSetup.js` (que no ejecuta) como código sin cubrir. Medido el 2026-11-16 (sentencias, ramas,
+funciones y líneas):
+
+| Comando | Antes | Después |
+| --- | --- | --- |
+| `npm test` (lo que ejecuta el CI) | 66,37 / 84,21 / 58,02 / 65,83 % | 88,98 / 84,32 / 78,06 / 89,23 % |
+| `npm run test:integration` | 25,06 / 32,36 / 19,65 / 25,41 % | 55,28 / 33,87 / 50,43 / 57,28 % |
+| `npm run test:all` | 98,27 / 93,09 / 97,92 / 98,67 % | 98,27 / 93,09 / 97,92 / 98,67 % |
+
+`test:all` no cambia porque ejecuta todos los tests y Jest ya excluía su `globalSetup`.
+
 ## Comprobaciones
 
 ```bash
@@ -514,7 +528,12 @@ para crearlo están en [deploy/README.md](deploy/README.md).
   `OPENROUTESERVICE_API_KEY` sigue funcionando como alternativa para configuraciones antiguas.
 - `OPENROUTESERVICE_GEOCODING_BASE_URL`: URL base de la API de geocodificación. Valor local por defecto: `https://api.heigit.org/pelias/v1`.
 - `OPENROUTESERVICE_DIRECTIONS_BASE_URL`: URL base de la API de rutas. Valor local por defecto:
-  `https://api.openrouteservice.org/v2/directions`.
+  `https://api.heigit.org/openrouteservice/v2/directions`.
+  OpenRouteService declaró obsoleto `api.openrouteservice.org` en favor de `api.heigit.org`
+  ([anuncio del 28-04-2026](https://ask.openrouteservice.org/t/deprecating-api-openrouteservice-org-in-favour-of-api-heigit-org/7912)),
+  con la misma clave y las mismas peticiones. El 16-11-2026 el host antiguo respondía con un límite
+  de 200 rutas al día y el nuevo con 2000. Si un `.env` define esta variable con el host antiguo,
+  cámbiala.
 - `OPEN_METEO_BASE_URL` (opcional): URL base de Open-Meteo. Valor por defecto:
   `https://api.open-meteo.com/v1`. El test de extremo a extremo del frontend (#161) la apunta a un
   servidor falso para no llamar al servicio real.
