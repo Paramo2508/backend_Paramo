@@ -940,6 +940,11 @@ Responde `204`. Borra la ruta solo para ese usuario, también si es predefinida.
 
 ## Historial y favoritos (PBI-12)
 
+> **Desde weathermapz-gestion #180** el historial de búsquedas de esta sección se sustituye por los
+> lugares recientes: `/api/route-history` ya no existe (responde `404`) y la tabla `route_searches` se
+> queda sin usar hasta que la elimine una migración posterior. Los favoritos no cambian. Ver
+> "Lugares recientes (#180)".
+
 Cada usuario tiene sus **10 últimas búsquedas** de ruta y hasta **20 trayectos favoritos**, con los
 puntos y el nombre que vio de cada uno (ADR-032, en DECISIONS.md de la carpeta docs del Drive del
 equipo). El frontend apunta la búsqueda cuando una ruta se calcula bien. Son ubicaciones personales:
@@ -980,6 +985,53 @@ favoritos.").
 ### `DELETE /api/route-favorites/:id`
 
 Responde `204`, o `404` si el favorito no existe o es de otro usuario.
+
+## Lugares recientes (#180)
+
+Cambia la PBI-12: en lugar de los últimos trayectos, cada usuario tiene sus **6 últimos lugares**
+usados como origen o destino, sin repetir y del más reciente al más antiguo. El frontend los ofrece
+al enfocar el origen o el destino y los apunta cuando una ruta se calcula bien (sin el punto de «Mi
+ubicación»). Son ubicaciones personales: se borran con el usuario (`ON DELETE CASCADE`) y la tabla
+nunca guarda más de 6. ADR-035 en DECISIONS.md de la carpeta docs del Drive del equipo.
+
+- **Tabla:** `recent_places (id, user_id, lat, lng, label, used_at)`, con índice único
+  `(user_id, lat, lng)`. Migración `20261116000001-create-recent-places`.
+- **Copia del historial anterior:** la migración copia los lugares de `route_searches`: origen y
+  destino, el uso más reciente de cada lugar, como mucho 6 por usuario y sin los de "Ubicación
+  actual". El log dice cuántos ha copiado y para cuántos usuarios, por ejemplo:
+  `create-recent-places: 4 place(s) copied from route_searches for 1 user(s); route_searches is left
+  unused`.
+- **`route_searches` se queda como está y sin usar:** ningún endpoint ni código la lee ni la escribe.
+  La eliminará una migración posterior, cuando esto esté en producción y comprobado. `npm run
+  db:migrate:undo` solo borra `recent_places`.
+- **Validación de los puntos:** como en los favoritos (coordenadas válidas y dentro de Zaragoza),
+  redondeados a 5 decimales (~1 m). El mismo lugar usado otra vez sube arriba con su nombre nuevo.
+- **Acceso:** todo exige sesión y cada usuario solo ve y borra lo suyo.
+
+### `GET /api/recent-places`
+
+Responde `200` con `{ "places": [{ "id", "lat", "lng", "label", "usedAt" }] }`, del más reciente al
+más antiguo, como mucho 6.
+
+### `POST /api/recent-places`
+
+Cuerpo `{ "places": [{ "lat", "lng", "label" }] }` con uno o dos lugares en el orden en que se usaron
+(origen y destino: el último cuenta como el más reciente); `label` opcional, hasta 200 caracteres.
+Responde `200` con la lista ya actualizada. Respuesta real (2026-11-16):
+
+```json
+{ "places": [{ "id": 6, "lat": 41.64886, "lng": -0.87933, "label": "Plaza de los Sitios", "usedAt": "2026-11-16T18:39:59.020Z" }, { "id": 5, "lat": 41.6572, "lng": -0.88039, "label": "Plaza del Pilar", "usedAt": "2026-11-16T18:39:59.017Z" }] }
+```
+
+Errores `400`:
+
+- Un lugar fuera de Zaragoza → `{ "message": "El origen y el destino tienen que estar en Zaragoza.",
+  "fields": { "places[0]": "Fuera de Zaragoza." } }`.
+- Ninguno o más de dos lugares → `"Envía uno o dos lugares."`.
+
+### `DELETE /api/recent-places`
+
+Responde `204`. Borra los lugares recientes del usuario; los favoritos se mantienen.
 
 ### `POST /api/routes/weighted`
 
@@ -1465,6 +1517,26 @@ de la PBI-9.1.
 - [ ] Sin sesión, cualquiera de los endpoints → `401`.
 - [ ] `npm run ci` y `npm run test:all` pasan (`routeTrips.test.js`, `routeHistoryService.test.js`,
       `routeHistory.test.js` y la integración `routeHistory.test.js`).
+- Desde #180 los puntos de `/api/route-history` de esta lista ya no aplican: ver "Lugares recientes
+  (#180)" a continuación.
+
+### Lugares recientes (#180)
+
+Con el servidor arrancado y `$h` como en la checklist de la PBI-9.1.
+
+- [ ] `npm run db:migrate` crea `recent_places` y el log dice cuántos lugares ha copiado de
+      `route_searches` y para cuántos usuarios; `npm run db:migrate:undo` borra `recent_places` y
+      deja `route_searches` con sus filas; se puede volver a aplicar.
+- [ ] `POST /api/recent-places` con origen y destino de Zaragoza → `200` con los dos, el destino
+      primero; repetir un lugar no crea otra fila (sube arriba) y con 7 lugares distintos solo
+      quedan los 6 últimos.
+- [ ] Un lugar fuera de Zaragoza → `400` con `places[0]` "Fuera de Zaragoza."; `{ "places": [] }` o
+      tres lugares → `400`.
+- [ ] `DELETE /api/recent-places` → `204` y `GET` devuelve `{ "places": [] }`; los favoritos siguen.
+- [ ] `GET /api/route-history` → `404`. Sin sesión, `/api/recent-places` → `401`.
+- [ ] `npm run ci` y `npm run test:all` pasan (`recentPlaces.test.js` unitario y de API,
+      `recentPlacesService.test.js` y la integración `recentPlaces.test.js`, que incluye la
+      migración).
 
 ### Nombres de ruta repetidos (#165)
 
