@@ -13,9 +13,6 @@ jest.mock('../api/middleware/requireAuth', () => ({
 
 jest.mock('../services/routing/routeHistoryService', () => ({
   routeHistoryService: {
-    listSearches: jest.fn(),
-    recordSearch: jest.fn(),
-    clearSearches: jest.fn(),
     listFavorites: jest.fn(),
     addFavorite: jest.fn(),
     removeFavorite: jest.fn()
@@ -32,33 +29,19 @@ const trip = {
   destination: { lat: 41.65069, lng: -0.88005, label: 'Plaza de España' }
 };
 
-describe('/api/route-history and /api/route-favorites', () => {
+describe('/api/route-favorites', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('needs a session', async () => {
     const app = createApp();
-    expect((await request(app).get('/api/route-history')).status).toBe(401);
     expect((await request(app).get('/api/route-favorites')).status).toBe(401);
-    expect(routeHistoryService.listSearches).not.toHaveBeenCalled();
+    expect(routeHistoryService.listFavorites).not.toHaveBeenCalled();
   });
 
-  it('lists, records and clears the history of the user', async () => {
-    const search = { id: 1, ...trip, searchedAt: '2026-11-14T20:00:00.000Z' };
-    routeHistoryService.listSearches.mockResolvedValue([search]);
-    routeHistoryService.recordSearch.mockResolvedValue(search);
-    routeHistoryService.clearSearches.mockResolvedValue(1);
+  it('no longer has the history of trips (#180: recent places instead)', async () => {
     const app = createApp();
-
-    const listed = await request(app).get('/api/route-history').set(auth);
-    const recorded = await request(app).post('/api/route-history').set(auth).send(trip);
-    const cleared = await request(app).delete('/api/route-history').set(auth);
-
-    expect(listed.body).toEqual({ searches: [search] });
-    expect(recorded.status).toBe(201);
-    expect(recorded.body).toEqual({ search });
-    expect(routeHistoryService.recordSearch).toHaveBeenCalledWith(7, trip);
-    expect(cleared.status).toBe(204);
-    expect(routeHistoryService.clearSearches).toHaveBeenCalledWith(7);
+    expect((await request(app).get('/api/route-history').set(auth)).status).toBe(404);
+    expect((await request(app).post('/api/route-history').set(auth).send(trip)).status).toBe(404);
   });
 
   it('lists, adds and removes the favourites of the user', async () => {
@@ -84,18 +67,17 @@ describe('/api/route-history and /api/route-favorites', () => {
   });
 
   it('passes the validation errors and conflicts to the client', async () => {
-    routeHistoryService.recordSearch.mockRejectedValue(
-      httpError(400, 'El origen y el destino tienen que estar en Zaragoza.', {
-        origin: 'Fuera de Zaragoza.'
-      })
-    );
-    routeHistoryService.addFavorite.mockRejectedValue(
-      httpError(409, 'Ese trayecto ya está en tus favoritos.')
-    );
+    routeHistoryService.addFavorite
+      .mockRejectedValueOnce(
+        httpError(400, 'El origen y el destino tienen que estar en Zaragoza.', {
+          origin: 'Fuera de Zaragoza.'
+        })
+      )
+      .mockRejectedValueOnce(httpError(409, 'Ese trayecto ya está en tus favoritos.'));
     routeHistoryService.removeFavorite.mockRejectedValue(httpError(404, 'No existe ese favorito.'));
     const app = createApp();
 
-    const invalid = await request(app).post('/api/route-history').set(auth).send({});
+    const invalid = await request(app).post('/api/route-favorites').set(auth).send({});
     const repeated = await request(app).post('/api/route-favorites').set(auth).send(trip);
     const missing = await request(app).delete('/api/route-favorites/99').set(auth);
 

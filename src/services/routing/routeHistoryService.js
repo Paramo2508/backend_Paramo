@@ -1,10 +1,10 @@
 const { importConfig } = require('../../config/importConfig');
-const { parseFavorite, parseTrip } = require('../../domain/routes/routeTrips');
+const { parseFavorite } = require('../../domain/routes/routeTrips');
 const defaultRepository = require('../../repositories/routeHistoryRepository');
 const { httpError } = require('../../utils/httpError');
 
-// PBI-12. Enough to repeat a recent trip without keeping more personal locations than needed.
-const MAX_SEARCHES_PER_USER = 10;
+// PBI-12: favourite trips. The history of trips was replaced by the recent places (#180,
+// recentPlacesService).
 // The same limit as the saved routes (PBI-6).
 const MAX_FAVORITES_PER_USER = 20;
 const FAVORITE_NOT_FOUND = 'No existe ese favorito.';
@@ -20,14 +20,6 @@ function createRouteHistoryService(
   serviceArea = importConfig.zaragozaBbox
 ) {
   return {
-    listSearches: (userId) => repository.listSearches(userId),
-
-    async recordSearch(userId, input) {
-      return repository.recordSearch(userId, parseTrip(input, serviceArea), MAX_SEARCHES_PER_USER);
-    },
-
-    clearSearches: (userId) => repository.clearSearches(userId),
-
     listFavorites: (userId) => repository.listFavorites(userId),
 
     async addFavorite(userId, input) {
@@ -48,7 +40,6 @@ function createRouteHistoryService(
 
 module.exports = {
   MAX_FAVORITES_PER_USER,
-  MAX_SEARCHES_PER_USER,
   createRouteHistoryService,
   routeHistoryService: createRouteHistoryService()
 };
