@@ -323,3 +323,31 @@ describe('OpenRouteService directions adapter', () => {
     await assertion;
   });
 });
+
+describe('OpenRouteService default base URLs', () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  // api.openrouteservice.org is deprecated in favour of api.heigit.org (#160): same key and requests.
+  it('uses the api.heigit.org hosts when the variables are not set', () => {
+    process.env = { ...originalEnv };
+    delete process.env.OPENROUTESERVICE_DIRECTIONS_BASE_URL;
+    delete process.env.OPENROUTESERVICE_GEOCODING_BASE_URL;
+    let loaded;
+    jest.isolateModules(() => {
+      // Without the local .env, which may set its own URLs.
+      jest.doMock('dotenv', () => ({ config: () => ({}) }));
+      // eslint-disable-next-line global-require
+      loaded = require('../config/env').env;
+    });
+    jest.dontMock('dotenv');
+
+    expect(loaded.openRouteServiceDirectionsBaseUrl).toBe(
+      'https://api.heigit.org/openrouteservice/v2/directions'
+    );
+    expect(loaded.openRouteServiceGeocodingBaseUrl).toBe('https://api.heigit.org/pelias/v1');
+  });
+});

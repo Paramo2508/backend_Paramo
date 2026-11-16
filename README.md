@@ -514,7 +514,12 @@ para crearlo están en [deploy/README.md](deploy/README.md).
   `OPENROUTESERVICE_API_KEY` sigue funcionando como alternativa para configuraciones antiguas.
 - `OPENROUTESERVICE_GEOCODING_BASE_URL`: URL base de la API de geocodificación. Valor local por defecto: `https://api.heigit.org/pelias/v1`.
 - `OPENROUTESERVICE_DIRECTIONS_BASE_URL`: URL base de la API de rutas. Valor local por defecto:
-  `https://api.openrouteservice.org/v2/directions`.
+  `https://api.heigit.org/openrouteservice/v2/directions`.
+  OpenRouteService declaró obsoleto `api.openrouteservice.org` en favor de `api.heigit.org`
+  ([anuncio del 28-04-2026](https://ask.openrouteservice.org/t/deprecating-api-openrouteservice-org-in-favour-of-api-heigit-org/7912)),
+  con la misma clave y las mismas peticiones. El 16-11-2026 el host antiguo respondía con un límite
+  de 200 rutas al día y el nuevo con 2000. Si un `.env` define esta variable con el host antiguo,
+  cámbiala.
 - `JWT_SECRET` (**obligatoria y secreta**): clave con la que se firman los tokens de sesión. Debe
   ser larga y aleatoria; se puede generar con
   `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Sin ella, el

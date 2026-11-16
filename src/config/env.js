@@ -26,7 +26,7 @@ const env = {
     process.env.OPENROUTESERVICE_GEOCODING_BASE_URL || 'https://api.heigit.org/pelias/v1',
   openRouteServiceDirectionsBaseUrl:
     process.env.OPENROUTESERVICE_DIRECTIONS_BASE_URL ||
-    'https://api.openrouteservice.org/v2/directions',
+    'https://api.heigit.org/openrouteservice/v2/directions',
   databaseUrl: nodeEnv === 'test' ? testDatabaseUrl : developmentDatabaseUrl,
   testDatabaseUrl,
   jwtSecret: process.env.JWT_SECRET || '',
