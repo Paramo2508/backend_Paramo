@@ -1147,6 +1147,11 @@ el prompt le dice su nombre y que llamarle por él no es pedir evitar el viento:
 sombra" solo sube la sombra. Comprobado con el modelo real (2026-11-16): `shade` 50 y el resto
 `null`, explicación "He puesto 50 en sombra.".
 
+Los avisos que devuelve el endpoint también hablan de Cierzo (#181): "Cierzo no está disponible en
+este servidor. Puedes ajustar la ruta a mano.", "Cierzo ha tardado demasiado…", "Has hecho muchas
+peticiones seguidas a Cierzo. Espera un minuto.", etc. Donde las checklists de abajo citan "el
+asistente" en esos avisos, ahora dice "Cierzo".
+
 Código: `src/integrations/llm/` (adaptador compatible con la API de OpenAI, con `fetch`),
 `src/domain/assistant/routeAssistant.js` (prompt, esquema y validación de la respuesta),
 `src/services/assistant/assistantRateLimiter.js` (límites) y
