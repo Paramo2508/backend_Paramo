@@ -1,6 +1,5 @@
 const {
   MAX_FAVORITES_PER_USER,
-  MAX_SEARCHES_PER_USER,
   createRouteHistoryService
 } = require('../../services/routing/routeHistoryService');
 
@@ -11,9 +10,6 @@ const trip = {
 };
 
 const repository = () => ({
-  listSearches: jest.fn().mockResolvedValue([]),
-  recordSearch: jest.fn().mockResolvedValue({ id: 1 }),
-  clearSearches: jest.fn().mockResolvedValue(3),
   listFavorites: jest.fn().mockResolvedValue([]),
   countFavorites: jest.fn().mockResolvedValue(0),
   createFavorite: jest.fn().mockResolvedValue({ id: 2 }),
@@ -21,22 +17,14 @@ const repository = () => ({
 });
 
 describe('routeHistoryService', () => {
-  it('records a validated search keeping only the last ten', async () => {
-    const repo = repository();
-    await createRouteHistoryService(repo, area).recordSearch(7, trip);
-
-    expect(repo.recordSearch).toHaveBeenCalledWith(7, trip, MAX_SEARCHES_PER_USER);
-    expect(MAX_SEARCHES_PER_USER).toBe(10);
-  });
-
-  it('does not record a search outside Zaragoza', async () => {
+  it('does not add a favourite outside Zaragoza', async () => {
     const repo = repository();
     const outside = { ...trip, destination: { lat: 40.4, lng: -3.7 } };
 
     await expect(
-      createRouteHistoryService(repo, area).recordSearch(7, outside)
+      createRouteHistoryService(repo, area).addFavorite(7, outside)
     ).rejects.toMatchObject({ status: 400 });
-    expect(repo.recordSearch).not.toHaveBeenCalled();
+    expect(repo.createFavorite).not.toHaveBeenCalled();
   });
 
   it('adds a favourite with its default name and refuses more than the maximum', async () => {
@@ -65,16 +53,9 @@ describe('routeHistoryService', () => {
     await expect(service.removeFavorite(7, 'abc')).rejects.toMatchObject({ status: 404 });
   });
 
-  it('lists and clears through the repository with the user id', async () => {
+  it('lists through the repository with the user id', async () => {
     const repo = repository();
-    const service = createRouteHistoryService(repo, area);
-
-    await service.listSearches(7);
-    await service.clearSearches(7);
-    await service.listFavorites(7);
-
-    expect(repo.listSearches).toHaveBeenCalledWith(7);
-    expect(repo.clearSearches).toHaveBeenCalledWith(7);
+    await createRouteHistoryService(repo, area).listFavorites(7);
     expect(repo.listFavorites).toHaveBeenCalledWith(7);
   });
 });

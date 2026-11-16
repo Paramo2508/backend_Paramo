@@ -1,6 +1,6 @@
 const { routeHistoryService } = require('../../services/routing/routeHistoryService');
 
-// PBI-12: history of route searches and favourite trips of the signed-in user.
+// PBI-12: favourite trips of the signed-in user. The recent places (#180) have their own controller.
 const handle = (action) => async (req, res, next) => {
   try {
     await action(req, res);
@@ -8,19 +8,6 @@ const handle = (action) => async (req, res, next) => {
     next(error);
   }
 };
-
-const listSearches = handle(async (req, res) => {
-  res.status(200).json({ searches: await routeHistoryService.listSearches(req.userId) });
-});
-
-const recordSearch = handle(async (req, res) => {
-  res.status(201).json({ search: await routeHistoryService.recordSearch(req.userId, req.body) });
-});
-
-const clearSearches = handle(async (req, res) => {
-  await routeHistoryService.clearSearches(req.userId);
-  res.status(204).end();
-});
 
 const listFavorites = handle(async (req, res) => {
   res.status(200).json({ favorites: await routeHistoryService.listFavorites(req.userId) });
@@ -35,11 +22,4 @@ const removeFavorite = handle(async (req, res) => {
   res.status(204).end();
 });
 
-module.exports = {
-  addFavorite,
-  clearSearches,
-  listFavorites,
-  listSearches,
-  recordSearch,
-  removeFavorite
-};
+module.exports = { addFavorite, listFavorites, removeFavorite };

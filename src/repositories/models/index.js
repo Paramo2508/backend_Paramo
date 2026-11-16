@@ -114,16 +114,8 @@ const tripColumns = {
   destinationLabel: DataTypes.STRING(200)
 };
 
-// PBI-12: last route searches and favourite trips of each user.
-const RouteSearch = sequelize.define(
-  'RouteSearch',
-  {
-    ...tripColumns,
-    searchedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }
-  },
-  { ...options, tableName: 'route_searches' }
-);
-
+// PBI-12: favourite trips of each user. The table route_searches (the old history of trips) is no
+// longer used (#180) and has no model.
 const RouteFavorite = sequelize.define(
   'RouteFavorite',
   {
@@ -132,6 +124,19 @@ const RouteFavorite = sequelize.define(
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }
   },
   { ...options, tableName: 'route_favorites' }
+);
+
+// #180 (changes PBI-12): the places used recently as origin or destination.
+const RecentPlace = sequelize.define(
+  'RecentPlace',
+  {
+    userId: { type: DataTypes.INTEGER, allowNull: false },
+    lat: { type: DataTypes.DOUBLE, allowNull: false },
+    lng: { type: DataTypes.DOUBLE, allowNull: false },
+    label: DataTypes.STRING(200),
+    usedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }
+  },
+  { ...options, tableName: 'recent_places' }
 );
 
 ImportRun.hasMany(ImportRejection, { foreignKey: 'importRunId' });
@@ -146,6 +151,6 @@ module.exports = {
   StreetSegment,
   User,
   RouteProfile,
-  RouteSearch,
-  RouteFavorite
+  RouteFavorite,
+  RecentPlace
 };

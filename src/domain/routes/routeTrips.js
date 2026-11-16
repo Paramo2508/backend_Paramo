@@ -2,8 +2,9 @@ const { httpError } = require('../../utils/httpError');
 const { isValidPoint } = require('./routeRequest');
 const { isInsideBbox } = require('../geo/geometryValidation');
 
-// PBI-12: a trip of the history or of the favourites is an origin and a destination with the name
-// the user saw for each one. Pure functions: no Express nor database.
+// PBI-12: a favourite trip is an origin and a destination with the name the user saw for each one.
+// The points of the recent places (#180) are validated the same way. Pure functions: no Express nor
+// database.
 
 const LABEL_MAX_LENGTH = 200;
 const FAVORITE_NAME_MAX_LENGTH = 60;
@@ -81,5 +82,6 @@ module.exports = {
   LABEL_MAX_LENGTH,
   defaultFavoriteName,
   parseFavorite,
+  parsePoint,
   parseTrip
 };
