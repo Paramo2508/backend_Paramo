@@ -3,6 +3,7 @@ const { DateTime } = require('luxon');
 const { assistantConfig } = require('../../config/assistantConfig');
 const { importConfig } = require('../../config/importConfig');
 const {
+  ASSISTANT_NAME,
   buildPrompt,
   interpretReply,
   settingChanges
@@ -21,24 +22,22 @@ const { getZaragozaWeather } = require('../weather/weatherService');
 const { calculateWeightedRouteComparison } = require('./weightedRouteService');
 
 // What the user reads when the assistant does not change the route (ADR-033). The route and the
-// weights they had stay as they were.
+// weights they had stay as they were. They speak of the assistant by its name (#181).
 const NOTICES = {
-  not_configured:
-    'El asistente no está disponible en este servidor. Puedes ajustar la ruta a mano.',
+  not_configured: `${ASSISTANT_NAME} no está disponible en este servidor. Puedes ajustar la ruta a mano.`,
   not_understood:
     'No he entendido la petición. Prueba con algo como «prefiero la sombra aunque tarde más» o «evita el viento».',
   no_change: 'Tu ruta ya tiene esos pesos: no cambia nada.',
-  timeout: 'El asistente ha tardado demasiado. Tu ruta no ha cambiado; inténtalo de nuevo.',
-  model_error: 'El asistente no ha podido responder. Tu ruta no ha cambiado; inténtalo más tarde.',
-  provider_busy:
-    'El asistente está muy solicitado ahora mismo. Tu ruta no ha cambiado; inténtalo en un rato.'
+  timeout: `${ASSISTANT_NAME} ha tardado demasiado. Tu ruta no ha cambiado; inténtalo de nuevo.`,
+  model_error: `${ASSISTANT_NAME} no ha podido responder. Tu ruta no ha cambiado; inténtalo más tarde.`,
+  provider_busy: `${ASSISTANT_NAME} está muy solicitado ahora mismo. Tu ruta no ha cambiado; inténtalo en un rato.`
 };
 
 const LIMIT_MESSAGES = {
-  'user:minute': 'Has hecho muchas peticiones seguidas al asistente. Espera un minuto.',
-  'user:day': 'Has llegado al máximo de peticiones al asistente de hoy. Vuelve mañana.',
-  'global:minute': 'El asistente está atendiendo muchas peticiones. Espera un minuto.',
-  'global:day': 'El asistente ha llegado a su máximo de peticiones de hoy. Vuelve mañana.'
+  'user:minute': `Has hecho muchas peticiones seguidas a ${ASSISTANT_NAME}. Espera un minuto.`,
+  'user:day': `Has llegado al máximo de peticiones a ${ASSISTANT_NAME} de hoy. Vuelve mañana.`,
+  'global:minute': `${ASSISTANT_NAME} está atendiendo muchas peticiones. Espera un minuto.`,
+  'global:day': `${ASSISTANT_NAME} ha llegado a su máximo de peticiones de hoy. Vuelve mañana.`
 };
 
 const defaultLimiter = createRateLimiter(assistantConfig.limits);
@@ -46,7 +45,7 @@ const defaultLimiter = createRateLimiter(assistantConfig.limits);
 function validateMessage(message, maxLength) {
   const text = typeof message === 'string' ? message.trim() : '';
   if (!text || text.length > maxLength) {
-    throw httpError(400, 'La petición al asistente no es válida.', {
+    throw httpError(400, `La petición a ${ASSISTANT_NAME} no es válida.`, {
       message: `Escribe tu petición en 1 a ${maxLength} caracteres.`
     });
   }

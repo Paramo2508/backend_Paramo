@@ -101,6 +101,13 @@ const MODEL_ANSWERS = {
     maxDetourPercentage: null,
     explanation: 'He puesto el viento al 50 % para evitar el viento de cara.'
   },
+  // #181: calling the assistant by its name is not a request about the wind.
+  'Cierzo, busca sombra': {
+    understood: true,
+    weights: { ...UNCHANGED, shade: 50 },
+    maxDetourPercentage: null,
+    explanation: 'He buscado sombra.'
+  },
   'quiero ir por parques': {
     understood: true,
     weights: { ...UNCHANGED, vegetation: 60 },
@@ -201,6 +208,23 @@ describe('POST /api/routes/assistant', () => {
         vegetation: 0
       });
       expect(response.body.comparison.wind).toMatchObject({ speedKmh: 40, source: 'open-meteo' });
+    });
+
+    it('"Cierzo, busca sombra": calling it by its name (#181) only raises the shade', async () => {
+      const response = await post(body({ message: 'Cierzo, busca sombra' }));
+
+      expect(response.status).toBe(200);
+      expect(response.body.assistant.changes).toEqual([{ factor: 'shade', before: 0, after: 50 }]);
+      expect(response.body.comparison.weights).toEqual({
+        shade: 50,
+        sun: 0,
+        wind: 0,
+        vegetation: 0
+      });
+      // The request goes to the model as written, with the rule about the name in the prompt.
+      const [call] = llmClient.completeJson.mock.calls;
+      expect(userMessageOf(call).peticion).toBe('Cierzo, busca sombra');
+      expect(call[0].system).toMatch(/Te llamas "Cierzo"/);
     });
 
     it('"quiero ir por parques": weighs the green and takes the green alternative', async () => {
@@ -381,6 +405,16 @@ describe('POST /api/routes/assistant', () => {
       expectNotice(await post(body()), 'not_configured');
       expect(llmClient.completeJson).not.toHaveBeenCalled();
     });
+
+    it('the notices speak of the assistant by its name, Cierzo (#181)', () => {
+      expect(NOTICES.not_configured).toBe(
+        'Cierzo no está disponible en este servidor. Puedes ajustar la ruta a mano.'
+      );
+      expect(NOTICES.timeout).toMatch(/^Cierzo ha tardado demasiado\./);
+      expect(NOTICES.model_error).toMatch(/^Cierzo no ha podido responder\./);
+      expect(NOTICES.provider_busy).toMatch(/^Cierzo está muy solicitado/);
+      expect(Object.values(NOTICES).join(' ')).not.toMatch(/asistente/i);
+    });
   });
 
   describe('usage limits', () => {
@@ -394,7 +428,7 @@ describe('POST /api/routes/assistant', () => {
 
       expect(response.status).toBe(429);
       expect(response.body.error.message).toBe(
-        'Has hecho muchas peticiones seguidas al asistente. Espera un minuto.'
+        'Has hecho muchas peticiones seguidas a Cierzo. Espera un minuto.'
       );
       expect(Number(response.headers['retry-after'])).toBeGreaterThan(0);
       expect(llmClient.completeJson).toHaveBeenCalledTimes(3);

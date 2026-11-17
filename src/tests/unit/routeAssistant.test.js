@@ -1,4 +1,5 @@
 const {
+  ASSISTANT_NAME,
   MAX_EXPLANATION_LENGTH,
   RESPONSE_SCHEMA,
   SYSTEM_PROMPT,
@@ -66,6 +67,15 @@ describe('buildPrompt', () => {
     expect(SYSTEM_PROMPT).toMatch(/"aunque tarde mucho más".*: 40/);
     expect(SYSTEM_PROMPT).toMatch(/Si la petición no habla del tiempo, devuelve null/);
     expect(SYSTEM_PROMPT).toMatch(/primera persona/);
+  });
+
+  it('knows its name and that calling it "Cierzo" is not a request about the wind (#181)', () => {
+    expect(ASSISTANT_NAME).toBe('Cierzo');
+    expect(SYSTEM_PROMPT).toMatch(/Te llamas "Cierzo"/);
+    expect(SYSTEM_PROMPT).toMatch(/no\s+es una petición sobre el viento/);
+    expect(SYSTEM_PROMPT).toMatch(/"Cierzo, busca sombra" → shade 50 y\s+wind null/);
+    // The wind of Zaragoza still counts when the user speaks of it.
+    expect(SYSTEM_PROMPT).toMatch(/"wind": evitar el viento de cara \(cierzo, viento\)/);
   });
 
   it('lets the model answer null for what it does not change', () => {
