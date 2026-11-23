@@ -72,11 +72,28 @@ Todas las geometrías se guardan en EPSG:4326 con índices GIST.
 | `email` | varchar(254), not null | Guardado en minúsculas; único sin distinguir mayúsculas (índice `users_email_lower_idx`) |
 | `password_hash` | varchar(100) | Hash bcrypt de la contraseña (nunca la contraseña); null en cuentas creadas solo con Google |
 | `google_id` | varchar(255), único | Identificador de la cuenta de Google vinculada; null si no se ha usado Google |
-| `route_profiles_seeded` | boolean, not null | Si ya se le copiaron las rutas predefinidas (PBI-6) |
+| `route_profiles_seeded` | boolean, not null | Si ya se le copiaron las rutas predefinidas (PBI-6). Sin usar desde la PBI-18 |
 | `created_at`, `updated_at` | timestamptz | Fechas de alta y última modificación |
 
 La restricción `users_credentials_check` obliga a que cada usuario tenga contraseña, cuenta de
 Google o ambas.
+
+### Tabla `route_preferences` (PBI-18)
+
+Las preferencias sencillas de cada usuario, una fila por usuario (migración
+`20261123000001-create-route-preferences`). Un usuario sin fila tiene las de por defecto.
+
+| Columna | Tipo | Descripción |
+| --- | --- | --- |
+| `user_id` | integer, clave primaria | Usuario; la fila se borra con él (`ON DELETE CASCADE`) |
+| `sun_shade` | varchar(5), not null | `shade` (Sombra), `sun` (Sol) o `any` (Me da igual), con `CHECK` |
+| `avoid_wind` | boolean, not null | Evitar el viento |
+| `prefer_parks` | boolean, not null | Por parques |
+| `extra_minutes` | smallint, not null | Minutos extra: 0, 2, 5, 10 o 15 (`CHECK`); 5 por defecto |
+| `updated_at` | timestamptz | Último cambio |
+
+Las tablas de las rutas guardadas (`route_profiles` y `users.route_profiles_seeded`) se quedan sin
+usar desde la PBI-18; las eliminará una migración posterior (ADR-036).
 
 ## Imports de datos urbanos (PBI-3.1)
 
@@ -662,7 +679,8 @@ viento que cruza la calle también cuenta (ADR-028):
   un cañón da 0 y una plaza 0,5; lo alineado sigue puntuando más que lo perpendicular.
 - **Dónde se usa:** `GET /api/segments/:id/wind-exposure` devuelve `openness` (la usada) y `street`
   (`widthM`, `heightM`, `hwRatio`, `samples`, o `null` si no se ha calculado). En
-  `POST /api/routes/weighted`, cada trozo de la ruta toma la apertura del tramo más cercano a menos
+  el cálculo ponderado (`/api/routes/preferred`, `/recommended` y el asistente; antes
+  `POST /api/routes/weighted`), cada trozo de la ruta toma la apertura del tramo más cercano a menos
   de 10 m (una sola consulta para todas las rutas, que se salta con viento en calma), y
   `windExposure.openness` es la media de la ruta.
 
@@ -717,7 +735,7 @@ objeto `user` de las respuestas es siempre `{ id, name, email }` y nunca incluye
 
 ### Endpoints protegidos
 
-`/api/routes/*`, `/api/route-profiles/*`, `/api/geocoding/*`, `/api/segments/*` y `/api/data/*` exigen un token válido. Sin cabecera, o con un token
+`/api/routes/*`, `/api/route-preferences` (antes `/api/route-profiles/*`), `/api/geocoding/*`, `/api/segments/*` y `/api/data/*` exigen un token válido. Sin cabecera, o con un token
 caducado o manipulado, responden:
 
 ```json
@@ -866,7 +884,90 @@ Crea ese fichero (ignorado por Git) a partir de `.env.example` antes de arrancar
 sobrescribas una clave existente. El frontend llega a la API a través del proxy de desarrollo de
 Vite.
 
+## Preferencias sencillas (PBI-18)
+
+El usuario elige la ruta respondiendo a preguntas sencillas en lugar de editar pesos (ADR-036, en
+DECISIONS.md de la carpeta docs del Drive del equipo). El backend traduce las respuestas a los mismos
+pesos de siempre (`src/domain/routes/routePreferences.js`) y calcula la ruta con el cálculo ponderado
+de la PBI-6, que no cambia:
+
+| Pregunta | Respuesta | Peso |
+| --- | --- | --- |
+| Sombra o sol (`sunShade`) | `shade` (Sombra) / `sun` (Sol) / `any` (Me da igual) | `shade` 50 / `sun` 50 / ninguno |
+| Evitar el viento (`avoidWind`) | `true` / `false` | `wind` 50 / 0 |
+| Por parques (`preferParks`) | `true` / `false` | `vegetation` 50 / 0 |
+
+El 50 es el de las antiguas rutas Sombreada y Soleada y el del viento de la recomendada (ADR-029).
+Con todo en «Me da igual» los pesos son 0 y solo se calcula la ruta rápida (`fastest_only`).
+
+**Tiempo extra en minutos** (`extraMinutes`): 0, 2, 5, 10 o 15, 5 por defecto. Una alternativa vale
+si dura como mucho la más rápida más esos minutos. Si hay alternativas mejores pero todas se pasan,
+`status` es `over_extra_time` (con `no_better_alternative` no hay ninguna mejor). A OpenRouteService
+se le pide `weight_factor` 1,25 hasta 5 minutos (como la Ruta Sombreada) y 1,4 con 10 y 15; los
+minutos son un tope, no una promesa: ORS no propone alternativas más largas que eso.
+`strategy.maximumExtraMinutes` dice el tope usado.
+
+### `GET /api/route-preferences` y `PUT /api/route-preferences`
+
+Con sesión. `GET` devuelve las del usuario o las de por defecto si nunca guardó ninguna:
+
+```json
+{ "preferences": { "sunShade": "any", "avoidWind": false, "preferParks": false, "extraMinutes": 5 } }
+```
+
+`PUT` las sustituye todas (los cuatro campos son obligatorios) y responde `200` con lo guardado.
+Un valor que no es una de las opciones → `400` con `fields` ("Elige «Sombra», «Sol» o «Me da
+igual».", "Debe ser sí o no.", "Elige 0, 2, 5, 10 o 15 minutos.").
+
+### `POST /api/routes/preferred`
+
+El mismo cuerpo que `POST /api/routes/shaded` (puntos, `date`, `time` y `timeZone`) más
+`preferences` con las cuatro respuestas:
+
+```json
+{
+  "origin": { "lat": 41.657204, "lng": -0.880394 },
+  "destination": { "lat": 41.641356, "lng": -0.895734 },
+  "date": "2026-11-23", "time": "13:00", "timeZone": "Europe/Madrid",
+  "preferences": { "sunShade": "shade", "avoidWind": true, "preferParks": false, "extraMinutes": 10 }
+}
+```
+
+Devuelve `{ "comparison": { ... } }` con los campos del cálculo ponderado (ver "Cálculo ponderado"
+más abajo: `status`, `weights`, `wind`, `fastest`, `selected`, `additionalDurationSeconds`,
+`shadeChangePercentagePoints`, `windChangePoints`, `greenChangePercentagePoints`,
+`candidatesEvaluated`, `strategy`) más `preferences` (las respuestas y `hasPreference`).
+`POST /api/routes/weighted` ya no existe (`404`): los pesos no forman parte de la API.
+
+### «Según el tiempo» (provisional hasta la PBI-21)
+
+`POST /api/routes/recommended` no cambia: el frontend lo usa como botón provisional «Según el
+tiempo», exactamente como la antigua «Recomendada» (sus pesos y su 25 % de tiempo extra). No se
+guarda en la cuenta. La PBI-21 (weathermapz-gestion #185) lo sustituirá.
+
+### Migración de las rutas guardadas
+
+`20261123000001-create-route-preferences` crea la tabla y da a cada usuario las preferencias de la
+ruta guardada que tocó más recientemente: una creada por él o una predefinida que editó
+(`updated_at > created_at`); gana la de `updated_at` más reciente. Un usuario que no tocó ninguna se
+queda con las de por defecto.
+
+- **Pesos → respuestas:** un peso ≥ 25 es «sí» (está más cerca de 50 que de 0); entre sombra y sol
+  gana el mayor.
+- **% → minutos:** 0 % → 0; 1-12 % → 2; 13-29 % → 5; 30-39 % → 10; 40 % → 15 (el 25 % por defecto
+  queda en los 5 minutos por defecto y el máximo, en el máximo).
+- **Log**, para apuntarlo al desplegar: `INFO create-route-preferences: 5 saved route(s) of 1
+  user(s) read; preferences migrated for 1 user(s) from the route they touched last; route_profiles
+  and users.route_profiles_seeded are left unused` (BD local, 2026-11-23).
+- `route_profiles` y `users.route_profiles_seeded` se quedan como están y sin usar. `down()` solo
+  borra `route_preferences`.
+
 ## Rutas con pesos (PBI-6)
+
+> **Desde la PBI-18 (weathermapz-gestion #182)** las rutas guardadas se retiran: `/api/route-profiles`
+> ya no existe (responde `404`) y las tablas `route_profiles` y `users.route_profiles_seeded` se
+> quedan sin usar hasta que las elimine una migración posterior. Ver "Preferencias sencillas
+> (PBI-18)" arriba. Lo que sigue se conserva como histórico.
 
 Cada usuario tiene sus rutas guardadas con un peso de 0 a 100 % para la sombra, otro para el sol y
 otro para el viento (PBI-8.2), y el tiempo extra máximo respecto a la ruta rápida, de 0 a 40 %
@@ -1033,7 +1134,12 @@ Errores `400`:
 
 Responde `204`. Borra los lugares recientes del usuario; los favoritos se mantienen.
 
-### `POST /api/routes/weighted`
+### `POST /api/routes/weighted` (cálculo ponderado)
+
+> **Desde la PBI-18** este endpoint ya no existe (`404`). El mismo cálculo lo usan
+> `POST /api/routes/preferred`, `POST /api/routes/recommended` y el asistente; el tiempo extra es en
+> minutos (`extraMinutes`) salvo en `/recommended`, que conserva su 25 % hasta la PBI-21. Lo que
+> sigue describe el cálculo, que no cambia.
 
 El mismo cuerpo que `POST /api/routes/shaded` más `"weights": { "shade": 80, "sun": 0, "wind": 0 }`
 y, opcionales, `"maxDetourPercentage": 10` (de 0 a 40; por defecto, 25) y
@@ -1083,7 +1189,8 @@ Ver ADR-026 y ADR-031 en DECISIONS.md, en la carpeta docs del Drive del equipo.
 - `greenChangePercentagePoints`: % verde de `selected` menos el de `fastest`.
 - **Rutas guardadas:** columna `vegetation_weight`, 0 por defecto (migración
   `20261112000002-add-route-profile-vegetation-weight`); `/api/route-profiles` acepta y devuelve
-  `weights.vegetation`. No hay ruta predefinida "Verde": cada usuario crea la suya.
+  `weights.vegetation`. No hay ruta predefinida "Verde": cada usuario crea la suya. Desde la PBI-18
+  el verde se pide con la respuesta «Por parques» (peso 50).
 
 Ejemplo real (2026-11-12, Plaza del Pilar → Plaza San Francisco, a las 23:00):
 
@@ -1127,25 +1234,28 @@ Ejemplo real (2026-11-12, Plaza del Pilar → Plaza San Francisco, a las 23:00):
 
 ## Asistente de rutas (PBI-9.2)
 
-`POST /api/routes/assistant` ajusta los pesos de la ruta con lo que el usuario escribe ("prefiero la
-sombra aunque tarde más", "evita el viento"...). Un modelo de lenguaje traduce el texto a los mismos
-pesos de siempre (`shade`, `sun`, `wind`, `vegetation` y `maxDetourPercentage`); el backend los
-valida con `parseWeights` y `parseMaxDetour` (0-100, sombra o sol, tiempo extra de 0 a 40 %) y
-recalcula la ruta exactamente como `POST /api/routes/weighted`. **El modelo no calcula rutas.**
-Requiere sesión. Decisión: ADR-033; flujo: ROUTING.md (carpeta docs del Drive del equipo).
+`POST /api/routes/assistant` ajusta las preferencias de la ruta con lo que el usuario escribe
+("prefiero la sombra aunque tarde más", "evita el viento"...). Desde la PBI-18 (ADR-036) el modelo
+de lenguaje traduce el texto a las mismas respuestas sencillas del panel (`sunShade`, `avoidWind`,
+`preferParks` y los minutos extra), nunca a pesos; el backend las valida con `parsePreferences` y
+recalcula la ruta exactamente como `POST /api/routes/preferred`. **El modelo no calcula rutas.**
+Requiere sesión. Decisión: ADR-033 y ADR-036; flujo: ROUTING.md (carpeta docs del Drive del
+equipo). El asistente está aparcado (propuesta Mejoras_S4): no tiene funciones nuevas.
 
 Los cambios son **incrementales**: el modelo devuelve `null` en todo lo que la petición no menciona
-y el backend conserva el valor actual. Con sombra 50, "evita el viento" deja sombra 50 y viento 50.
-Sombra y sol son una sola escala: pedir sol quita la sombra. Solo se cambia todo si el usuario lo
-pide ("lo más rápido", "olvida lo anterior"). El tiempo extra solo cambia si la petición habla del
-tiempo: "un poco más" suma 10 puntos, "más" suma 15 y "mucho más" lo lleva a 40 (nunca pasa de 40).
-La explicación es una frase en primera persona del asistente ("He buscado…", "He puesto…").
+y el backend conserva el valor actual. Con «Sombra», "evita el viento" deja la sombra y añade el
+viento. Sombra y sol se excluyen. Solo se cambia todo si el usuario lo pide ("lo más rápido",
+"olvida lo anterior"). El tiempo extra solo cambia si la petición habla del tiempo y siempre queda
+en una de las opciones: un número ("como mucho 10 minutos más") es un máximo (la opción más alta que
+no lo supera); sin número, `timeChange` mueve la opción actual: "un poco más" una arriba, "más" dos,
+"mucho más" a 15 y "sin tardar mucho más" una abajo. La explicación es una frase en primera persona
+del asistente, sin pesos ni porcentajes ("He buscado…", "Evitaré…").
 
 **Nombre del asistente (#181):** en la app se llama **Cierzo** (`ASSISTANT_NAME` en
 `routeAssistant.js`). Como "cierzo" también es el viento de Zaragoza y el prompt lo asocia a `wind`,
 el prompt le dice su nombre y que llamarle por él no es pedir evitar el viento: "Cierzo, busca
-sombra" solo sube la sombra. Comprobado con el modelo real (2026-11-16): `shade` 50 y el resto
-`null`, explicación "He puesto 50 en sombra.".
+sombra" solo cambia la sombra. Comprobado con el modelo real (2026-11-16, todavía con pesos):
+`shade` 50 y el resto `null`, explicación "He puesto 50 en sombra.".
 
 Los avisos que devuelve el endpoint también hablan de Cierzo (#181): "Cierzo no está disponible en
 este servidor. Puedes ajustar la ruta a mano.", "Cierzo ha tardado demasiado…", "Has hecho muchas
@@ -1164,25 +1274,24 @@ Código: `src/integrations/llm/` (adaptador compatible con la API de OpenAI, con
   "origin": { "lat": 41.651386, "lng": -0.881746 },
   "destination": { "lat": 41.633463, "lng": -0.896436 },
   "message": "prefiero la sombra aunque tarde más",
-  "weights": { "shade": 0, "sun": 0, "wind": 0, "vegetation": 0 },
-  "maxDetourPercentage": 25
+  "preferences": { "sunShade": "any", "avoidWind": false, "preferParks": false, "extraMinutes": 5 }
 }
 ```
 
-`weights` y `maxDetourPercentage` son los de la ruta que se ve ahora. `date`, `time` y `timeZone` son
+`preferences` son las respuestas de la ruta que se ve ahora. `date`, `time` y `timeZone` son
 opcionales: sin ellos la ruta se calcula para ahora (hora de Zaragoza). Todo se valida **antes** de
-llamar al modelo y sin gastar el límite: texto vacío o de más de 300 caracteres, pesos o tiempo
-extra no válidos, puntos fuera de Zaragoza o fecha no válida → `400` con `fields`.
+llamar al modelo y sin gastar el límite: texto vacío o de más de 300 caracteres, respuestas o
+minutos no válidos, puntos fuera de Zaragoza o fecha no válida → `400` con `fields`.
 
 ### Respuesta
 
 Siempre `200`, salvo `400` (petición no válida), `429` (límite) o los errores del recálculo de
-`/weighted` (por ejemplo, `502` de OpenRouteService). `assistant.status` dice qué ha pasado:
+la ruta (por ejemplo, `502` de OpenRouteService). `assistant.status` dice qué ha pasado:
 
 | `status` | Cuándo | `comparison` |
 | --- | --- | --- |
-| `applied` | El modelo ha entendido la petición y cambia algún peso | La de `/weighted` con los pesos nuevos |
-| `no_change` | La ha entendido, pero los pesos ya eran esos | `null` |
+| `applied` | El modelo ha entendido la petición y cambia alguna respuesta | La de `/preferred` con las respuestas nuevas |
+| `no_change` | La ha entendido, pero las respuestas ya eran esas | `null` |
 | `not_understood` | Petición ambigua o fuera de tema | `null` |
 | `model_error` | Error del proveedor o respuesta que no cumple el esquema o las reglas | `null` |
 | `timeout` | El modelo tarda más de `LLM_TIMEOUT_MS` | `null` |
@@ -1193,18 +1302,12 @@ Siempre `200`, salvo `400` (petición no válida), `429` (límite) o los errores
 {
   "assistant": {
     "status": "applied",
-    "explanation": "Busco sombra y acepto hasta un 35 % más de tiempo.",
-    "before": {
-      "weights": { "shade": 0, "sun": 0, "wind": 0, "vegetation": 0 },
-      "maxDetourPercentage": 25
-    },
-    "after": {
-      "weights": { "shade": 50, "sun": 0, "wind": 0, "vegetation": 0 },
-      "maxDetourPercentage": 35
-    },
+    "explanation": "He buscado sombra aunque tardes un poco más.",
+    "before": { "sunShade": "any", "avoidWind": false, "preferParks": false, "extraMinutes": 5 },
+    "after": { "sunShade": "shade", "avoidWind": false, "preferParks": false, "extraMinutes": 15 },
     "changes": [
-      { "factor": "shade", "before": 0, "after": 50 },
-      { "factor": "maxDetourPercentage", "before": 25, "after": 35 }
+      { "question": "sunShade", "before": "any", "after": "shade" },
+      { "question": "extraMinutes", "before": 5, "after": 15 }
     ]
   },
   "comparison": {
@@ -1214,9 +1317,10 @@ Siempre `200`, salvo `400` (petición no válida), `429` (límite) o los errores
 }
 ```
 
-(Recortado: `comparison` es la de `/api/routes/weighted` completa.) Si no se aplica nada, en vez de
+(Recortado: `comparison` es la del cálculo ponderado completa.) Si no se aplica nada, en vez de
 `explanation`, `after` y `changes` llegan `message` (el aviso en español para el usuario),
-`after: null`, `changes: []` y `comparison: null`: el frontend conserva la ruta y los pesos actuales.
+`after: null`, `changes: []` y `comparison: null`: el frontend conserva la ruta y las respuestas
+actuales.
 `no_change` trae también la `explanation` del modelo.
 
 ### Límites
@@ -1235,7 +1339,7 @@ Siempre `200`, salvo `400` (petición no válida), `429` (límite) o los errores
 
 ### Qué datos salen hacia el proveedor
 
-Solo el texto que escribe el usuario, los pesos y el tiempo extra actuales y el tiempo actual de la
+Solo el texto que escribe el usuario, sus respuestas y minutos actuales y el tiempo actual de la
 ciudad (temperatura, sensación, viento, rachas y dirección; no se envía si Open-Meteo falla). **No se
 envían** el email, el nombre, el id del usuario, las coordenadas, los nombres de los lugares ni la
 geometría de la ruta. El frontend avisa de que no se escriban datos personales. En los logs solo
@@ -1244,8 +1348,11 @@ Groq está activada la retención cero (ZDR).
 
 ## Ruta recomendada (PBI-9.1)
 
+> **Desde la PBI-18** el frontend la ofrece como botón provisional «Según el tiempo» hasta la
+> PBI-21 (#185). El endpoint no cambia: mismos pesos y mismo 25 % de tiempo extra.
+
 `POST /api/routes/recommended` elige los pesos de la ruta con el tiempo actual de Open-Meteo y la
-altura del Sol, y calcula la ruta con ellos igual que `POST /api/routes/weighted`. Requiere sesión,
+altura del Sol, y calcula la ruta con ellos con el cálculo ponderado de la PBI-6. Requiere sesión,
 como el resto de `/api/routes`. La regla es una función pura
 (`src/domain/routes/routeRecommendation.js`) con los umbrales en `src/config/recommendationConfig.js`;
 está explicada en el ADR-029 y el flujo en ROUTING.md: ver DECISIONS.md y ROUTING.md en la carpeta
@@ -1268,7 +1375,8 @@ llamar a Open-Meteo ni a OpenRouteService.
 
 Sensación térmica (`apparent_temperature`; si Open-Meteo no la da, `temperature_2m`), viento medio,
 rachas y elevación solar en el origen. Sombra y sol reutilizan los pesos de las rutas predefinidas
-(Sombreada y Soleada); el viento, `RECOMMENDATION_WIND_WEIGHT`. Tiempo extra: 25 %.
+(Sombreada y Soleada; desde la PBI-18, los de las respuestas Sombra y Sol, también 50); el viento,
+`RECOMMENDATION_WIND_WEIGHT`. Tiempo extra: 25 %.
 
 | `criterion` | Condición | Pesos (sombra/sol/viento) |
 | --- | --- | --- |
@@ -1291,7 +1399,7 @@ invierno, que es ambigua) la ruta tampoco falla: "Sol no disponible", sin sombra
 
 ### Respuesta
 
-`{ "comparison": { ... } }` con los mismos campos que `POST /api/routes/weighted` (`status`,
+`{ "comparison": { ... } }` con los mismos campos que el cálculo ponderado (`status`,
 `weights`, `wind`, `fastest`, `selected`, `additionalDurationSeconds`,
 `shadeChangePercentagePoints`, `windChangePoints`, `candidatesEvaluated`, `strategy`) más
 `recommendation`:
@@ -1458,7 +1566,49 @@ pero no añade migraciones ni dependencias.
 
 ## Checklist de verificación manual
 
+### PBI-18 - Preferencias sencillas
+
+Con el servidor arrancado y `$api`, `$h` y `$body` como en la checklist de la PBI-9.1.
+
+```powershell
+Invoke-RestMethod "$api/route-preferences" -Headers $h | ConvertTo-Json
+$prefs = @{ sunShade = 'shade'; avoidWind = $true; preferParks = $false; extraMinutes = 10 }
+Invoke-RestMethod -Method Put "$api/route-preferences" -Headers $h -ContentType 'application/json' `
+  -Body ($prefs | ConvertTo-Json) | ConvertTo-Json
+$b = $body | ConvertFrom-Json
+$b | Add-Member date '2026-11-23'; $b | Add-Member time '13:00'; $b | Add-Member timeZone 'Europe/Madrid'
+$b | Add-Member preferences $prefs
+(Invoke-RestMethod -Method Post "$api/routes/preferred" -Headers $h -ContentType 'application/json' `
+  -Body ($b | ConvertTo-Json -Depth 4)).comparison | Select-Object status, weights, strategy
+```
+
+- [ ] `npm run db:migrate` crea `route_preferences` y el log dice cuántas rutas y usuarios ha leído
+      y a cuántos usuarios ha migrado; `npm run db:migrate:undo` solo borra `route_preferences` y
+      `route_profiles` sigue con sus filas; se puede volver a aplicar.
+- [ ] Un usuario nuevo: `GET /api/route-preferences` → todo indiferente y `extraMinutes` 5. Tras el
+      `PUT`, otro `GET` (también con otra sesión del mismo usuario) devuelve lo guardado.
+- [ ] `PUT` con `extraMinutes` 7 o `sunShade` "both" → `400` con `fields`.
+- [ ] `POST /api/routes/preferred` con Sombra + Evitar el viento → `weights` 50/0/50/0 y
+      `strategy.maximumExtraMinutes` 10; con todo indiferente → `fastest_only`; con `extraMinutes` 0
+      y una alternativa mejor pero más larga → `over_extra_time`.
+- [ ] `POST /api/routes/weighted` y `GET /api/route-profiles` → `404`.
+- [ ] `POST /api/routes/recommended` sigue igual (`recommendation.maxDetourPercentage` 25).
+- [ ] `npm run ci` y `npm run test:all` pasan (`routePreferences.test.js` unitario, de API y de
+      integración, que incluye la migración; `preferredRoute.test.js`, `preferredRouteService.test.js`,
+      `routePreferencesService.test.js`, `weightedRouteService.test.js` y
+      `weightedRouteSelection.test.js`).
+
+Resultado en la BD local (2026-11-23): 1 usuario con 5 rutas guardadas; la última tocada es
+«Soleada» editada a sombra 60 % y +40 % (19-11-2026), así que queda Sombra, sin viento ni parques y
++15 minutos. `route_profiles` mantiene sus 5 filas.
+
 ### PBI-9.2 - Asistente de rutas
+
+> **Desde la PBI-18** el asistente recibe y devuelve respuestas (`preferences`) en lugar de pesos:
+> en lo que sigue, `weights` y `maxDetourPercentage` se sustituyen por
+> `preferences = @{ sunShade = 'any'; avoidWind = $false; preferParks = $false; extraMinutes = 5 }`,
+> y "Guardar como ruta" por "Usar como mis preferencias". La tabla del modelo real es de antes de la
+> PBI-18.
 
 Con el servidor arrancado y `$api`, `$h` y `$body` como en la checklist de la PBI-9.1. Primero sin
 clave; después con `LLM_API_KEY` en `.env` y el servidor reiniciado.
@@ -1553,6 +1703,9 @@ Con el servidor arrancado y `$h` como en la checklist de la PBI-9.1.
 
 ### Nombres de ruta repetidos (#165)
 
+> **Desde la PBI-18** ya no hay rutas guardadas ni `/api/route-profiles`: esta checklist es
+> histórica.
+
 Con la migración aplicada (`npm run db:migrate`), el servidor arrancado y `$h` como en la checklist
 de la PBI-9.1.
 
@@ -1585,6 +1738,8 @@ aplicada (`npm run db:migrate`), el servidor arrancado y `$h` como en la checkli
       Grande: +4,9 puntos, por debajo de la mejora mínima de 5).
 - [ ] `POST /api/route-profiles` con `"weights": { "vegetation": 70 }` la guarda; `GET` devuelve
       `vegetation` (0 en las rutas anteriores y en las predefinidas); `"vegetation": 101` → `400`.
+      (Desde la PBI-18 `/api/route-profiles` y `/api/routes/weighted` ya no existen: el verde se pide
+      con «Por parques» en `/api/routes/preferred`.)
 - [ ] `npm run ci` y `npm run test:all` pasan (integración: `routeProfiles.test.js` y
       `vegetation.test.js`).
 
@@ -1717,6 +1872,9 @@ consultas SQL se pegan en `docker compose exec db psql -U weathermapz -d weather
       `green_areas_import_changed`; `npm run compute:vegetation` lo deja en false.
 - [ ] `npm run lint`, `npm run format:check` y `npm run test:all` (con la BD levantada) en verde.
 ### PBI-8.2 - El viento en el cálculo de rutas
+
+> **Desde la PBI-18** `/api/route-profiles` y `/api/routes/weighted` ya no existen: el viento se pide
+> con «Evitar el viento» en `/api/routes/preferred`. Esta checklist es histórica.
 
 Con el servidor arrancado, `$token` como en la PBI-3.3 y la migración aplicada (`npm run db:migrate`).
 
