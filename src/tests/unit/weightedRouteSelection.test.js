@@ -1,9 +1,5 @@
-const {
-  PRESET_PROFILES,
-  hasEnvironmentalWeight,
-  parseProfileInput,
-  parseWeights
-} = require('../../domain/routes/routeWeights');
+const { weightsFromAnswers } = require('../../domain/routes/routePreferences');
+const { hasEnvironmentalWeight, parseWeights } = require('../../domain/routes/routeWeights');
 const { environmentalCost } = require('../../domain/routes/shadedRouteSelection');
 const {
   MAX_DURATION_FACTOR,
@@ -21,22 +17,16 @@ const route = (id, duration, shadePercentage, status = 'available') => ({
     sunPercentage: status === 'available' ? 100 - shadePercentage : null
   }
 });
-const preset = (key) => PRESET_PROFILES.find(({ presetKey }) => presetKey === key).weights;
+// The weights of the answers "Sombra" and "Sol" (the old presets Sombreada and Soleada).
+const PRESETS = {
+  shaded: weightsFromAnswers({ sunShade: 'shade', avoidWind: false, preferParks: false }),
+  sunny: weightsFromAnswers({ sunShade: 'sun', avoidWind: false, preferParks: false })
+};
+const preset = (key) => PRESETS[key];
 // Fast and sunny, a little longer and shaded, and something in between.
 const candidates = [route('fast', 600, 20), route('shade', 680, 85), route('middle', 640, 50)];
 
 describe('route weights', () => {
-  it('has the three presets of PBI-6', () => {
-    expect(PRESET_PROFILES.every(({ maxDetourPercentage }) => maxDetourPercentage === 25)).toBe(
-      true
-    );
-    expect(PRESET_PROFILES.map(({ name, weights }) => [name, weights])).toEqual([
-      ['Rápida', { shade: 0, sun: 0, wind: 0, vegetation: 0 }],
-      ['Sombreada', { shade: 50, sun: 0, wind: 0, vegetation: 0 }],
-      ['Soleada', { shade: 0, sun: 50, wind: 0, vegetation: 0 }]
-    ]);
-  });
-
   it('accepts whole percentages and treats a missing factor as 0', () => {
     expect(parseWeights({ shade: 100 })).toEqual({ shade: 100, sun: 0, wind: 0, vegetation: 0 });
     expect(hasEnvironmentalWeight({ shade: 0, sun: 0 })).toBe(false);
@@ -73,28 +63,6 @@ describe('route weights', () => {
 
   it.each([null, [], 'shade'])('rejects weights that are not an object: %j', (weights) => {
     expect(() => parseWeights(weights)).toThrow(expect.objectContaining({ status: 400 }));
-  });
-
-  it('validates the name of a saved route', () => {
-    expect(parseProfileInput({ name: '  Verano ', weights: { shade: 80 } })).toEqual({
-      name: 'Verano',
-      weights: { shade: 80, sun: 0, wind: 0, vegetation: 0 },
-      maxDetourPercentage: 25
-    });
-    expect(
-      parseProfileInput({ name: 'Corta', weights: { shade: 80 }, maxDetourPercentage: 0 })
-    ).toMatchObject({ maxDetourPercentage: 0 });
-    expect(() =>
-      parseProfileInput({ name: 'Larga', weights: {}, maxDetourPercentage: 41 })
-    ).toThrow(
-      expect.objectContaining({ status: 400, fields: { maxDetourPercentage: expect.any(String) } })
-    );
-    expect(() => parseProfileInput({ name: ' ', weights: {} })).toThrow(
-      expect.objectContaining({ status: 400, fields: { name: expect.any(String) } })
-    );
-    expect(() => parseProfileInput({ name: 'x'.repeat(41), weights: {} })).toThrow(
-      expect.objectContaining({ status: 400 })
-    );
   });
 });
 
@@ -159,6 +127,46 @@ describe('weighted route selection', () => {
     );
 
     expect(result).toMatchObject({ status: 'no_better_alternative', selected: null });
+  });
+
+  describe('extra time in minutes (PBI-18, ADR-036)', () => {
+    const shade = { shade: 50, sun: 0 };
+
+    it('limits the alternatives to the fastest duration plus the seconds given', () => {
+      // "shade" takes 80 s more and "middle" 40 s more.
+      expect(
+        selectWeightedRoute(candidates, shade, { maxExtraSeconds: 120 }).selected
+      ).toMatchObject({ id: 'shade' });
+      expect(
+        selectWeightedRoute(candidates, shade, { maxExtraSeconds: 80 }).selected
+      ).toMatchObject({ id: 'shade' });
+      expect(
+        selectWeightedRoute(candidates, shade, { maxExtraSeconds: 60 }).selected
+      ).toMatchObject({ id: 'middle' });
+    });
+
+    it('says over_extra_time when every better route takes longer than allowed', () => {
+      expect(selectWeightedRoute(candidates, shade, { maxExtraSeconds: 0 })).toMatchObject({
+        status: 'over_extra_time',
+        fastest: { id: 'fast' },
+        selected: null
+      });
+    });
+
+    it('says no_better_alternative when no route is better, whatever the time', () => {
+      const sunny = [route('fast', 600, 20), route('long', 900, 10)];
+      expect(selectWeightedRoute(sunny, shade, { maxExtraSeconds: 0 }).status).toBe(
+        'no_better_alternative'
+      );
+    });
+
+    it('keeps no_better_alternative for the factor of the Shaded Route (PBI-5.4)', () => {
+      const result = selectWeightedRoute(
+        [route('fast', 600, 0), route('long', 600 * MAX_DURATION_FACTOR + 1, 100)],
+        { shade: 100, sun: 0 }
+      );
+      expect(result.status).toBe('no_better_alternative');
+    });
   });
 
   it('asks for an improvement of at least 5 points in what the weights favour', () => {
@@ -300,23 +308,5 @@ describe('vegetation weight (PBI-10 phase B, ADR-031)', () => {
       shadeChangePercentagePoints: 60,
       greenChangePercentagePoints: 90
     });
-  });
-});
-
-describe('names of the saved routes (#165)', () => {
-  it('reserves "Recomendada" for the recommended route, without case or spaces', () => {
-    ['Recomendada', ' recomendada ', 'RECOMENDADA'].forEach((name) => {
-      expect(() => parseProfileInput({ name, weights: { shade: 50 } })).toThrow(
-        expect.objectContaining({
-          status: 400,
-          fields: { name: '«Recomendada» es la ruta automática: elige otro nombre.' }
-        })
-      );
-    });
-  });
-
-  it('accepts names that only look like it: accents and extra words count', () => {
-    expect(parseProfileInput({ name: 'Recomendáda', weights: {} }).name).toBe('Recomendáda');
-    expect(parseProfileInput({ name: 'Recomendada 2', weights: {} }).name).toBe('Recomendada 2');
   });
 });

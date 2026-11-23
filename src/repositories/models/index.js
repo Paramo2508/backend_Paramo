@@ -83,25 +83,24 @@ const User = sequelize.define(
     name: { type: DataTypes.STRING(100), allowNull: false },
     email: { type: DataTypes.STRING(254), allowNull: false },
     passwordHash: DataTypes.STRING(100),
-    googleId: DataTypes.STRING(255),
-    routeProfilesSeeded: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }
+    googleId: DataTypes.STRING(255)
   },
   { underscored: true, timestamps: true, tableName: 'users' }
 );
 
-const RouteProfile = sequelize.define(
-  'RouteProfile',
+// PBI-18 (ADR-036): the simple route preferences of each user. The tables of the saved routes
+// (route_profiles and users.route_profiles_seeded) are no longer used and have no model.
+const RoutePreference = sequelize.define(
+  'RoutePreference',
   {
-    userId: { type: DataTypes.INTEGER, allowNull: false },
-    name: { type: DataTypes.STRING(40), allowNull: false },
-    presetKey: DataTypes.STRING(20),
-    shadeWeight: { type: DataTypes.SMALLINT, allowNull: false },
-    sunWeight: { type: DataTypes.SMALLINT, allowNull: false },
-    windWeight: { type: DataTypes.SMALLINT, allowNull: false, defaultValue: 0 },
-    vegetationWeight: { type: DataTypes.SMALLINT, allowNull: false, defaultValue: 0 },
-    maxDetourPercentage: { type: DataTypes.SMALLINT, allowNull: false, defaultValue: 25 }
+    userId: { type: DataTypes.INTEGER, primaryKey: true },
+    sunShade: { type: DataTypes.STRING(5), allowNull: false },
+    avoidWind: { type: DataTypes.BOOLEAN, allowNull: false },
+    preferParks: { type: DataTypes.BOOLEAN, allowNull: false },
+    extraMinutes: { type: DataTypes.SMALLINT, allowNull: false },
+    updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }
   },
-  { underscored: true, timestamps: true, tableName: 'route_profiles' }
+  { ...options, tableName: 'route_preferences' }
 );
 
 const tripColumns = {
@@ -150,7 +149,7 @@ module.exports = {
   Tree,
   StreetSegment,
   User,
-  RouteProfile,
+  RoutePreference,
   RouteFavorite,
   RecentPlace
 };

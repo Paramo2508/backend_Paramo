@@ -12,7 +12,7 @@ const {
   validateRoutePoints,
   validateShadedRouteRequest
 } = require('../../domain/routes/routeRequest');
-const { parseMaxDetour, parseWeights } = require('../../domain/routes/routeWeights');
+const { parsePreferences, weightsFromAnswers } = require('../../domain/routes/routePreferences');
 const { ZARAGOZA_TIME_ZONE } = require('../../domain/solar/solarPosition');
 const { llmClient } = require('../../integrations/llm/llmClient');
 const { httpError } = require('../../utils/httpError');
@@ -22,12 +22,12 @@ const { getZaragozaWeather } = require('../weather/weatherService');
 const { calculateWeightedRouteComparison } = require('./weightedRouteService');
 
 // What the user reads when the assistant does not change the route (ADR-033). The route and the
-// weights they had stay as they were. They speak of the assistant by its name (#181).
+// preferences they had stay as they were. They speak of the assistant by its name (#181).
 const NOTICES = {
   not_configured: `${ASSISTANT_NAME} no está disponible en este servidor. Puedes ajustar la ruta a mano.`,
   not_understood:
     'No he entendido la petición. Prueba con algo como «prefiero la sombra aunque tarde más» o «evita el viento».',
-  no_change: 'Tu ruta ya tiene esos pesos: no cambia nada.',
+  no_change: 'Tus preferencias ya son esas: no cambia nada.',
   timeout: `${ASSISTANT_NAME} ha tardado demasiado. Tu ruta no ha cambiado; inténtalo de nuevo.`,
   model_error: `${ASSISTANT_NAME} no ha podido responder. Tu ruta no ha cambiado; inténtalo más tarde.`,
   provider_busy: `${ASSISTANT_NAME} está muy solicitado ahora mismo. Tu ruta no ha cambiado; inténtalo en un rato.`
@@ -61,10 +61,7 @@ function validateAssistantRequest(input, config) {
   }
   return {
     message: validateMessage(input?.message, config.maxMessageLength),
-    before: {
-      weights: parseWeights(input?.weights),
-      maxDetourPercentage: parseMaxDetour(input?.maxDetourPercentage)
-    }
+    before: parsePreferences(input?.preferences)
   };
 }
 
@@ -107,7 +104,8 @@ const notice = (status, before, extra = {}) => ({
 
 /**
  * The route assistant (PBI-9.2, ADR-033): the language model turns the user's request into new
- * weights, the backend checks them like any route and recalculates it as POST /api/routes/weighted.
+ * answers (PBI-18, ADR-036), the backend checks them like any route and recalculates it as
+ * POST /api/routes/preferred, with the weights of those answers.
  * When the model is not set up, fails, is slow or does not understand, the answer is 200 with
  * `comparison: null` and a notice, so the frontend keeps the current route.
  */
@@ -136,7 +134,11 @@ async function adjustRouteWithAssistant(
 
   let reply;
   try {
-    const prompt = buildPrompt({ message, ...before, weather: await contextWeather(weather) });
+    const prompt = buildPrompt({
+      message,
+      preferences: before,
+      weather: await contextWeather(weather)
+    });
     reply = interpretReply(await llm.completeJson(prompt), before);
   } catch (error) {
     // Only the code and a message without the key or the user's text (ADR-033).
@@ -145,7 +147,7 @@ async function adjustRouteWithAssistant(
   }
 
   if (!reply.understood) return notice('not_understood', before);
-  const after = { weights: reply.weights, maxDetourPercentage: reply.maxDetourPercentage };
+  const after = reply.preferences;
   const changes = settingChanges(before, after);
   if (!changes.length) {
     return notice('no_change', before, { explanation: reply.explanation, after: before });
@@ -156,7 +158,8 @@ async function adjustRouteWithAssistant(
       origin: input.origin,
       destination: input.destination,
       ...routeMoment(input, now()),
-      ...after
+      weights: weightsFromAnswers(after),
+      extraMinutes: after.extraMinutes
     },
     { weather, ...dependencies }
   );

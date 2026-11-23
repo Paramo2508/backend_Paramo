@@ -36,7 +36,8 @@ const { NOTICES, assistantLimiter } = require('../services/routing/routeAssistan
 const { calculateSegmentExposures } = require('../services/shadow/exposureService');
 const { getZaragozaWeather } = require('../services/weather/weatherService');
 
-const NO_WEIGHTS = { shade: 0, sun: 0, wind: 0, vegetation: 0 };
+// The current answers: everything indifferent and the default 5 minutes (ADR-036).
+const NO_PREFERENCES = { sunShade: 'any', avoidWind: false, preferParks: false, extraMinutes: 5 };
 const body = (overrides = {}) => ({
   origin: { lat: 41.65, lng: -0.87 },
   destination: { lat: 41.65, lng: -0.882 },
@@ -44,8 +45,7 @@ const body = (overrides = {}) => ({
   time: '13:00',
   timeZone: 'Europe/Madrid',
   message: 'prefiero la sombra aunque tarde más',
-  weights: NO_WEIGHTS,
-  maxDetourPercentage: 25,
+  preferences: NO_PREFERENCES,
   ...overrides
 });
 
@@ -85,53 +85,52 @@ const WEATHER = {
   timeZone: 'Europe/Madrid'
 };
 
-// What the simulated model answers to each typical request (ADR-033): null for what the request
-// does not mention, as the real model does.
-const UNCHANGED = { shade: null, sun: null, wind: null, vegetation: null };
+// What the simulated model answers to each typical request (ADR-033, answers since ADR-036): null
+// for what the request does not mention, as the real model does.
+const UNCHANGED = {
+  sunShade: null,
+  avoidWind: null,
+  preferParks: null,
+  extraMinutes: null,
+  timeChange: null
+};
 const MODEL_ANSWERS = {
   'prefiero la sombra aunque tarde más': {
     understood: true,
-    weights: { ...UNCHANGED, shade: 50 },
-    maxDetourPercentage: 35,
-    explanation: 'He buscado sombra y acepto hasta un 35 % más de tiempo.'
+    ...UNCHANGED,
+    sunShade: 'shade',
+    timeChange: 'more',
+    explanation: 'He buscado sombra aunque tardes un poco más.'
   },
   'evita el viento': {
     understood: true,
-    weights: { ...UNCHANGED, wind: 50 },
-    maxDetourPercentage: null,
-    explanation: 'He puesto el viento al 50 % para evitar el viento de cara.'
+    ...UNCHANGED,
+    avoidWind: true,
+    explanation: 'Evitaré el viento de cara.'
   },
   // #181: calling the assistant by its name is not a request about the wind.
   'Cierzo, busca sombra': {
     understood: true,
-    weights: { ...UNCHANGED, shade: 50 },
-    maxDetourPercentage: null,
+    ...UNCHANGED,
+    sunShade: 'shade',
     explanation: 'He buscado sombra.'
   },
   'quiero ir por parques': {
     understood: true,
-    weights: { ...UNCHANGED, vegetation: 60 },
-    maxDetourPercentage: null,
+    ...UNCHANGED,
+    preferParks: true,
     explanation: 'He buscado calles con árboles y parques.'
   },
   'lo más rápido': {
     understood: true,
-    weights: NO_WEIGHTS,
-    maxDetourPercentage: null,
+    ...UNCHANGED,
+    sunShade: 'any',
+    avoidWind: false,
+    preferParks: false,
     explanation: 'He quitado todas las preferencias: solo cuenta el tiempo.'
   },
-  'cuéntame un chiste': {
-    understood: false,
-    weights: UNCHANGED,
-    maxDetourPercentage: null,
-    explanation: ''
-  },
-  'algo mejor': {
-    understood: false,
-    weights: UNCHANGED,
-    maxDetourPercentage: null,
-    explanation: ''
-  }
+  'cuéntame un chiste': { understood: false, ...UNCHANGED, explanation: '' },
+  'algo mejor': { understood: false, ...UNCHANGED, explanation: '' }
 };
 
 const post = (payload, user = 1) =>
@@ -182,17 +181,19 @@ describe('POST /api/routes/assistant', () => {
       expect(response.status).toBe(200);
       expect(response.body.assistant).toEqual({
         status: 'applied',
-        explanation: 'He buscado sombra y acepto hasta un 35 % más de tiempo.',
-        before: { weights: NO_WEIGHTS, maxDetourPercentage: 25 },
-        after: { weights: { shade: 50, sun: 0, wind: 0, vegetation: 0 }, maxDetourPercentage: 35 },
+        explanation: 'He buscado sombra aunque tardes un poco más.',
+        before: NO_PREFERENCES,
+        // "más" moves two options up: from 5 to 15 minutes.
+        after: { ...NO_PREFERENCES, sunShade: 'shade', extraMinutes: 15 },
         changes: [
-          { factor: 'shade', before: 0, after: 50 },
-          { factor: 'maxDetourPercentage', before: 25, after: 35 }
+          { question: 'sunShade', before: 'any', after: 'shade' },
+          { question: 'extraMinutes', before: 5, after: 15 }
         ]
       });
       expect(response.body.comparison).toMatchObject({
         status: 'selected',
         weights: { shade: 50, sun: 0, wind: 0, vegetation: 0 },
+        strategy: { maximumExtraMinutes: 15 },
         selected: { distance: 1600, exposure: { shadePercentage: 80 } }
       });
     });
@@ -200,7 +201,9 @@ describe('POST /api/routes/assistant', () => {
     it('"evita el viento": weighs the wind', async () => {
       const response = await post(body({ message: 'evita el viento' }));
 
-      expect(response.body.assistant.changes).toEqual([{ factor: 'wind', before: 0, after: 50 }]);
+      expect(response.body.assistant.changes).toEqual([
+        { question: 'avoidWind', before: false, after: true }
+      ]);
       expect(response.body.comparison.weights).toEqual({
         shade: 0,
         sun: 0,
@@ -214,7 +217,9 @@ describe('POST /api/routes/assistant', () => {
       const response = await post(body({ message: 'Cierzo, busca sombra' }));
 
       expect(response.status).toBe(200);
-      expect(response.body.assistant.changes).toEqual([{ factor: 'shade', before: 0, after: 50 }]);
+      expect(response.body.assistant.changes).toEqual([
+        { question: 'sunShade', before: 'any', after: 'shade' }
+      ]);
       expect(response.body.comparison.weights).toEqual({
         shade: 50,
         sun: 0,
@@ -231,7 +236,7 @@ describe('POST /api/routes/assistant', () => {
       const response = await post(body({ message: 'quiero ir por parques' }));
 
       expect(response.body.assistant.changes).toEqual([
-        { factor: 'vegetation', before: 0, after: 60 }
+        { question: 'preferParks', before: false, after: true }
       ]);
       expect(response.body.comparison).toMatchObject({
         status: 'selected',
@@ -239,17 +244,14 @@ describe('POST /api/routes/assistant', () => {
       });
     });
 
-    it('is incremental: with shade 50, "evita el viento" keeps the shade', async () => {
-      const shaded = { shade: 50, sun: 0, wind: 0, vegetation: 0 };
-      const response = await post(
-        body({ message: 'evita el viento', weights: shaded, maxDetourPercentage: 35 })
-      );
+    it('is incremental: with shade, "evita el viento" keeps the shade', async () => {
+      const shaded = { ...NO_PREFERENCES, sunShade: 'shade', extraMinutes: 10 };
+      const response = await post(body({ message: 'evita el viento', preferences: shaded }));
 
-      expect(response.body.assistant.after).toEqual({
-        weights: { shade: 50, sun: 0, wind: 50, vegetation: 0 },
-        maxDetourPercentage: 35
-      });
-      expect(response.body.assistant.changes).toEqual([{ factor: 'wind', before: 0, after: 50 }]);
+      expect(response.body.assistant.after).toEqual({ ...shaded, avoidWind: true });
+      expect(response.body.assistant.changes).toEqual([
+        { question: 'avoidWind', before: false, after: true }
+      ]);
       expect(response.body.comparison.weights).toEqual({
         shade: 50,
         sun: 0,
@@ -258,13 +260,13 @@ describe('POST /api/routes/assistant', () => {
       });
     });
 
-    it('"lo más rápido": every weight back to 0, only the fastest route', async () => {
-      const current = { shade: 50, sun: 0, wind: 30, vegetation: 0 };
-      const response = await post(body({ message: 'lo más rápido', weights: current }));
+    it('"lo más rápido": every answer back to indifferent, only the fastest route', async () => {
+      const current = { ...NO_PREFERENCES, sunShade: 'shade', avoidWind: true };
+      const response = await post(body({ message: 'lo más rápido', preferences: current }));
 
       expect(response.body.assistant.changes).toEqual([
-        { factor: 'shade', before: 50, after: 0 },
-        { factor: 'wind', before: 30, after: 0 }
+        { question: 'sunShade', before: 'shade', after: 'any' },
+        { question: 'avoidWind', before: true, after: false }
       ]);
       expect(response.body.comparison).toMatchObject({ status: 'fastest_only', selected: null });
       expect(getAlternativeWalkingRoutes).not.toHaveBeenCalled();
@@ -290,18 +292,15 @@ describe('POST /api/routes/assistant', () => {
       }
     });
 
-    it('a request that keeps the same weights does not recalculate the route', async () => {
-      const current = {
-        weights: { shade: 50, sun: 0, wind: 0, vegetation: 0 },
-        maxDetourPercentage: 35
-      };
-      const response = await post(body(current));
+    it('a request that keeps the same answers does not recalculate the route', async () => {
+      const current = { ...NO_PREFERENCES, sunShade: 'shade', extraMinutes: 15 };
+      const response = await post(body({ preferences: current }));
 
       expect(response.body).toEqual({
         assistant: {
           status: 'no_change',
           message: NOTICES.no_change,
-          explanation: 'He buscado sombra y acepto hasta un 35 % más de tiempo.',
+          explanation: 'He buscado sombra aunque tardes un poco más.',
           before: current,
           after: current,
           changes: []
@@ -312,13 +311,12 @@ describe('POST /api/routes/assistant', () => {
     });
   });
 
-  it('sends the model only the request, the weights and the city weather', async () => {
+  it('sends the model only the request, the answers and the city weather', async () => {
     await post(body());
 
     expect(userMessageOf(llmClient.completeJson.mock.calls[0])).toEqual({
       peticion: 'prefiero la sombra aunque tarde más',
-      pesosActuales: NO_WEIGHTS,
-      tiempoExtraMaximoActual: 25,
+      preferenciasActuales: NO_PREFERENCES,
       tiempoActual: {
         temperaturaC: 31,
         sensacionTermicaC: 33,
@@ -347,7 +345,7 @@ describe('POST /api/routes/assistant', () => {
         assistant: {
           status,
           message: NOTICES[status],
-          before: { weights: NO_WEIGHTS, maxDetourPercentage: 25 },
+          before: NO_PREFERENCES,
           after: null,
           changes: []
         },
@@ -362,13 +360,13 @@ describe('POST /api/routes/assistant', () => {
     });
 
     it.each([
-      ['shade and sun at once', { shade: 50, sun: 50, wind: 0, vegetation: 0 }],
-      ['a weight above 100', { shade: 150, sun: 0, wind: 0, vegetation: 0 }]
-    ])('an answer with %s is a model error', async (_case, weights) => {
+      ['shade and sun at once', { sunShade: 'both' }],
+      ['a word that is not an answer', { preferParks: 'parks' }]
+    ])('an answer with %s is a model error', async (_case, answer) => {
       llmClient.completeJson.mockResolvedValue({
         understood: true,
-        weights,
-        maxDetourPercentage: 25,
+        ...UNCHANGED,
+        ...answer,
         explanation: 'x'
       });
       expectNotice(await post(body()), 'model_error');
@@ -461,8 +459,17 @@ describe('POST /api/routes/assistant', () => {
     it.each([
       ['an empty message', { message: '   ' }, 'message'],
       ['a message longer than 300 characters', { message: 'a'.repeat(301) }, 'message'],
-      ['current weights with shade and sun', { weights: { shade: 10, sun: 10 } }, 'shade'],
-      ['an extra time above 40 %', { maxDetourPercentage: 50 }, 'maxDetourPercentage']
+      [
+        'current answers that are not one of the options',
+        { preferences: { ...NO_PREFERENCES, sunShade: 'both' } },
+        'sunShade'
+      ],
+      [
+        'minutes that are not one of the options',
+        { preferences: { ...NO_PREFERENCES, extraMinutes: 25 } },
+        'extraMinutes'
+      ],
+      ['no current answers', { preferences: undefined }, 'preferences']
     ])('%s → 400', async (_case, overrides, field) => {
       const response = await post(body(overrides));
 

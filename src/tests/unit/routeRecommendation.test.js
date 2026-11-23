@@ -1,6 +1,6 @@
 const { recommendationConfig } = require('../../config/recommendationConfig');
 const { recommendRoute } = require('../../domain/routes/routeRecommendation');
-const { PRESET_PROFILES } = require('../../domain/routes/routeWeights');
+const { weightsFromAnswers } = require('../../domain/routes/routePreferences');
 
 // One case per row of ADR-029 and the exact limits of every threshold.
 const config = recommendationConfig;
@@ -20,8 +20,10 @@ const weather = (overrides = {}) => ({
 const recommend = (weatherOverrides, sun = DAY) =>
   recommendRoute({ weather: weather(weatherOverrides), sun }, config);
 
+// The weights of the old presets, now those of the answers "Sombra" and "Sol" (ADR-036).
+const SUN_SHADE = { fastest: 'any', shaded: 'shade', sunny: 'sun' };
 const presetWeights = (presetKey) =>
-  PRESET_PROFILES.find((profile) => profile.presetKey === presetKey).weights;
+  weightsFromAnswers({ sunShade: SUN_SHADE[presetKey], avoidWind: false, preferParks: false });
 
 describe('recommended route rule (ADR-029)', () => {
   it('uses the thresholds confirmed by the product owner', () => {

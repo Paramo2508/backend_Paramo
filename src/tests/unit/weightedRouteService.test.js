@@ -99,33 +99,114 @@ describe('weighted route service', () => {
       selected: { duration: 660 },
       additionalDurationSeconds: 60,
       candidatesEvaluated: 2,
-      strategy: { maximumDurationFactor: 1.25, minimumImprovementPercentagePoints: 5 }
+      strategy: { maximumExtraMinutes: 5, minimumImprovementPercentagePoints: 5 }
     });
     expect(result.shadeChangePercentagePoints).toBeCloseTo(70);
     expect(exposureCalculator).toHaveBeenCalledTimes(1);
-    // Up to 25 %, ORS is asked exactly as for the Shaded Route.
+    // Up to 5 minutes, ORS is asked exactly as for the Shaded Route (ADR-036).
     expect(routesProvider).toHaveBeenCalledWith(expect.any(Object), { weightFactor: 1.25 });
   });
 
-  it('only accepts the extra time chosen by the user', async () => {
-    const result = await calculateWeightedRouteComparison(
-      { ...input, weights: { shade: 50, sun: 0 }, maxDetourPercentage: 5 },
-      dependencies
-    );
+  describe('provisional "Según el tiempo": the 25 % of the recommended route (ADR-036)', () => {
+    it('keeps choosing with the percentage when only maxDetourPercentage is sent', async () => {
+      const result = await calculateWeightedRouteComparison(
+        { ...input, weights: { shade: 50 }, maxDetourPercentage: 25 },
+        dependencies
+      );
 
-    expect(result).toMatchObject({
-      status: 'no_better_alternative',
-      strategy: { maximumDurationFactor: 1.05 }
+      expect(result).toMatchObject({
+        status: 'selected',
+        strategy: { maximumDurationFactor: 1.25, minimumImprovementPercentagePoints: 5 }
+      });
+      expect(result.strategy).not.toHaveProperty('maximumExtraMinutes');
+      expect(routesProvider).toHaveBeenCalledWith(expect.any(Object), { weightFactor: 1.25 });
+    });
+
+    it('discards an alternative over the percentage, as before', async () => {
+      const result = await calculateWeightedRouteComparison(
+        { ...input, weights: { shade: 50 }, maxDetourPercentage: 5 },
+        dependencies
+      );
+
+      // 10 % longer than the fastest one: over 5 %, so no_better_alternative as in PBI-6.
+      expect(result.status).toBe('no_better_alternative');
+    });
+
+    it('prefers the minutes when both are sent and rejects a percentage over 40', async () => {
+      const both = await calculateWeightedRouteComparison(
+        { ...input, weights: { shade: 50 }, maxDetourPercentage: 25, extraMinutes: 0 },
+        dependencies
+      );
+      expect(both.status).toBe('over_extra_time');
+      await expect(
+        calculateWeightedRouteComparison(
+          { ...input, weights: { shade: 50 }, maxDetourPercentage: 41 },
+          dependencies
+        )
+      ).rejects.toMatchObject({ status: 400 });
     });
   });
 
-  it('asks ORS for longer alternatives when the user accepts more time', async () => {
-    await calculateWeightedRouteComparison(
-      { ...input, weights: { shade: 50, sun: 0 }, maxDetourPercentage: 40 },
-      dependencies
-    );
+  describe('extra time in minutes (PBI-18, ADR-036)', () => {
+    it('accepts an alternative that takes exactly the minutes chosen', async () => {
+      const result = await calculateWeightedRouteComparison(
+        { ...input, weights: { shade: 50 }, extraMinutes: 2 },
+        dependencies
+      );
 
-    expect(routesProvider).toHaveBeenCalledWith(expect.any(Object), { weightFactor: 1.4 });
+      // The alternative takes 1 minute more.
+      expect(result).toMatchObject({ status: 'selected', additionalDurationSeconds: 60 });
+
+      routesProvider.mockResolvedValue([
+        { geometry: geometry(), distance: 1000, duration: 600 },
+        { geometry: geometry(0.001), distance: 1150, duration: 720 }
+      ]);
+      const exactly = await calculateWeightedRouteComparison(
+        { ...input, weights: { shade: 50 }, extraMinutes: 2 },
+        dependencies
+      );
+      expect(exactly).toMatchObject({ status: 'selected', additionalDurationSeconds: 120 });
+    });
+
+    it('says when the better alternatives take longer than the minutes chosen', async () => {
+      const result = await calculateWeightedRouteComparison(
+        { ...input, weights: { shade: 50 }, extraMinutes: 0 },
+        dependencies
+      );
+
+      expect(result).toMatchObject({
+        status: 'over_extra_time',
+        selected: null,
+        additionalDurationSeconds: null,
+        fastest: { duration: 600 },
+        strategy: { maximumExtraMinutes: 0 }
+      });
+    });
+
+    it.each([
+      [0, 1.25],
+      [2, 1.25],
+      [5, 1.25],
+      [10, 1.4],
+      [15, 1.4]
+    ])('with %i minutes asks ORS for a weight factor of %d', async (extraMinutes, weightFactor) => {
+      await calculateWeightedRouteComparison(
+        { ...input, weights: { shade: 50 }, extraMinutes },
+        dependencies
+      );
+
+      expect(routesProvider).toHaveBeenCalledWith(expect.any(Object), { weightFactor });
+    });
+
+    it('only accepts 0, 2, 5, 10 or 15 minutes', async () => {
+      await expect(
+        calculateWeightedRouteComparison(
+          { ...input, weights: { shade: 50 }, extraMinutes: 3 },
+          dependencies
+        )
+      ).rejects.toMatchObject({ status: 400, fields: { extraMinutes: expect.any(String) } });
+      expect(routesProvider).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps the fastest route when the weights favour what it already has', async () => {
@@ -171,7 +252,7 @@ describe('weighted route service', () => {
     ).rejects.toMatchObject({ status: 400 });
     await expect(
       calculateWeightedRouteComparison(
-        { ...input, weights: { shade: 50 }, maxDetourPercentage: 80 },
+        { ...input, weights: { shade: 50 }, extraMinutes: 7 },
         dependencies
       )
     ).rejects.toMatchObject({ status: 400 });
