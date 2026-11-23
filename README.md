@@ -1604,6 +1604,22 @@ Resultado en la BD local (2026-11-23): 1 usuario con 5 rutas guardadas; la últi
 
 ### PBI-9.2 - Asistente de rutas
 
+Resultado con el modelo real (2026-11-23, Groq `openai/gpt-oss-20b`, Plaza del Pilar → Plaza San
+Francisco a las 13:00, con OpenRouteService real), con las respuestas de la PBI-18:
+
+| Petición | Respuestas después (pesos) | Explicación (tras el arreglo de \#40) | ¿Cambia la ruta? |
+| --- | --- | --- | --- |
+| «prefiero la sombra aunque tarde más» | Sombra, +15 (50/0/0/0) | «He buscado calles con sombra aunque tarde más.» | No: la rápida ya es la más sombreada |
+| «evita el viento» (desde Sombra) | Sombra + viento, +5 (50/0/50/0) | «Evitaré el viento de cara y no cambio lo demás.» | No |
+| «Cierzo, busca sombra» | Sombra, sin viento, +5 (50/0/0/0) | «He buscado calles con sombra.» | No |
+| «quiero ir por parques, como mucho 10 minutos más» | Por parques, +10 (0/0/0/50) | «He buscado calles con parques y acepto hasta 10 minutos más.» | Sí: 30,9 min y 50 % de verde |
+| «lo más rápido» (desde Sol + viento + parques) | Todo indiferente (0/0/0/0) | «He restablecido todas las preferencias a sus valores por defecto.» | Sí: vuelve a la rápida |
+
+- **Antes del arreglo:** tres explicaciones eran ejemplos del prompt copiados con sus puntos
+  suspensivos («He buscado sombra…», «Evitaré el viento…»). Las respuestas y las rutas eran las
+  mismas.
+- **La clave** no aparece en la salida ni en los logs.
+
 > **Desde la PBI-18** el asistente recibe y devuelve respuestas (`preferences`) en lugar de pesos:
 > en lo que sigue, `weights` y `maxDetourPercentage` se sustituyen por
 > `preferences = @{ sunShade = 'any'; avoidWind = $false; preferParks = $false; extraMinutes = 5 }`,

@@ -83,6 +83,18 @@ describe('buildPrompt', () => {
     expect(SYSTEM_PROMPT).toMatch(/primera persona/);
   });
 
+  it('asks for a complete sentence and gives no example ending in "…" (the model copied them)', () => {
+    expect(SYSTEM_PROMPT).toMatch(/UNA frase completa/);
+    expect(SYSTEM_PROMPT).toMatch(/nunca con puntos suspensivos/);
+    // Every quoted example of the prompt: none ends in "…" or "...".
+    const examples = SYSTEM_PROMPT.match(/"[^"\n]*"/g);
+    expect(examples.length).toBeGreaterThan(0);
+    examples.forEach((example) => expect(example).not.toMatch(/(…|\.\.\.)"$/));
+    expect(SYSTEM_PROMPT).not.toMatch(/…/);
+    // The examples of the explanation are whole sentences ending in a full stop.
+    expect(SYSTEM_PROMPT).toMatch(/"He buscado calles con sombra aunque tardes un poco más\."/);
+  });
+
   it('knows its name and that calling it "Cierzo" is not a request about the wind (#181)', () => {
     expect(ASSISTANT_NAME).toBe('Cierzo');
     expect(SYSTEM_PROMPT).toMatch(/Te llamas "Cierzo"/);
