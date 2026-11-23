@@ -1,15 +1,27 @@
-const { PRESET_PROFILES } = require('./routeWeights');
+const { weightsFromAnswers } = require('./routePreferences');
 
 /*
  * Rule of the recommended route (PBI-9.1, ADR-029): from the current weather and the height of the
  * Sun it chooses the weights of the route and explains why. It is pure: no Express, no Open-Meteo
  * and no clock; the thresholds come in `config` (src/config/recommendationConfig.js).
  *
- * Shade and sun reuse the presets of PBI-6 (ADR-023) instead of repeating their weights; wind has no
- * preset and takes `config.windWeight`.
+ * Shade and sun reuse the weights of the old presets of PBI-6 (ADR-023), now those of the answers
+ * "Sombra" and "Sol" (ADR-036); wind has no preset and takes `config.windWeight`. Until PBI-21 the
+ * rule is the same as in PBI-9.1, with the extra time of the presets (25 %): the provisional button
+ * "Según el tiempo" calls it exactly as the old "Recomendada" (ADR-036).
  */
 
-const preset = (presetKey) => PRESET_PROFILES.find((profile) => profile.presetKey === presetKey);
+const PRESET_MAX_DETOUR_PERCENTAGE = 25;
+const answers = (sunShade) => ({ sunShade, avoidWind: false, preferParks: false });
+const PRESETS = {
+  fastest: weightsFromAnswers(answers('any')),
+  shaded: weightsFromAnswers(answers('shade')),
+  sunny: weightsFromAnswers(answers('sun'))
+};
+const preset = (presetKey) => ({
+  weights: PRESETS[presetKey],
+  maxDetourPercentage: PRESET_MAX_DETOUR_PERCENTAGE
+});
 
 const BASE_PRESET = {
   hot: 'shaded',
