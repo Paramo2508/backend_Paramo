@@ -18,4 +18,13 @@ async function putPreferences(req, res, next) {
   }
 }
 
-module.exports = { getPreferences, putPreferences };
+// PBI-21 (ADR-037): what «Según el tiempo de hoy» marks with the current weather.
+async function getWeatherSuggestion(req, res, next) {
+  try {
+    res.status(200).json({ suggestion: await routePreferencesService.getWeatherSuggestion() });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { getPreferences, getWeatherSuggestion, putPreferences };

@@ -156,6 +156,7 @@ describe('recommended route rule (ADR-029)', () => {
         label: 'Sin datos del tiempo',
         weights: presetWeights('fastest'),
         maxDetourPercentage: 25,
+        cause: 'No se ha podido consultar el tiempo actual',
         reason: 'No se ha podido consultar el tiempo actual: la ruta recomendada es la más rápida.',
         rules: []
       });

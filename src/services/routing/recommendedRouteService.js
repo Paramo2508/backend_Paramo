@@ -118,4 +118,4 @@ async function calculateRecommendedRoute(
   };
 }
 
-module.exports = { calculateRecommendedRoute };
+module.exports = { calculateRecommendedRoute, currentWeather, sunNow, weatherUsed };

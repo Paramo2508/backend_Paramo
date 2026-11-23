@@ -63,6 +63,30 @@ function parsePreferences(input) {
   };
 }
 
+/*
+ * «Según el tiempo de hoy» (PBI-21, ADR-037) is kept in the account with the answers: on for a new
+ * user (DEFAULT_SAVED_PREFERENCES), and afterwards whatever the user chose last. It is not part of
+ * the preferences of a route (parsePreferences): the weather only marks the answers. A client that
+ * does not send it (before PBI-21) leaves it off.
+ */
+const DEFAULT_SAVED_PREFERENCES = Object.freeze({ ...DEFAULT_PREFERENCES, byWeather: true });
+
+function parseSavedPreferences(input) {
+  const byWeather = isObject(input) ? input.byWeather : undefined;
+  const fields = {};
+  let preferences;
+  try {
+    preferences = parsePreferences(input);
+  } catch (error) {
+    if (!error.fields) throw error;
+    Object.assign(fields, error.fields);
+  }
+  if (byWeather !== undefined && typeof byWeather !== 'boolean')
+    fields.byWeather = 'Debe ser sí o no.';
+  if (Object.keys(fields).length) throw httpError(400, 'Las preferencias no son válidas.', fields);
+  return { ...preferences, byWeather: byWeather ?? false };
+}
+
 // The answers to the three questions, without the minutes.
 const answersOf = ({ sunShade, avoidWind, preferParks }) => ({ sunShade, avoidWind, preferParks });
 
@@ -88,6 +112,7 @@ function alternativesWeightFactor(extraMinutes) {
 module.exports = {
   DEFAULT_EXTRA_MINUTES,
   DEFAULT_PREFERENCES,
+  DEFAULT_SAVED_PREFERENCES,
   EXTRA_MINUTES_OPTIONS,
   PREFERENCE_WEIGHT,
   SUN_SHADE_OPTIONS,
@@ -96,5 +121,6 @@ module.exports = {
   hasPreference,
   parseExtraMinutes,
   parsePreferences,
+  parseSavedPreferences,
   weightsFromAnswers
 };

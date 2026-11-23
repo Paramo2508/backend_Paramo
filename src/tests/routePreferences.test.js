@@ -8,7 +8,11 @@ jest.mock('../api/middleware/requireAuth', () => ({
 }));
 
 jest.mock('../services/routing/routePreferencesService', () => ({
-  routePreferencesService: { getPreferences: jest.fn(), savePreferences: jest.fn() }
+  routePreferencesService: {
+    getPreferences: jest.fn(),
+    savePreferences: jest.fn(),
+    getWeatherSuggestion: jest.fn()
+  }
 }));
 
 const { createApp } = require('../app');
@@ -58,6 +62,23 @@ describe('/api/route-preferences (PBI-18, ADR-036)', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error.fields).toEqual({ extraMinutes: 'Elige 0, 2, 5, 10 o 15 minutos.' });
+  });
+
+  it('GET /weather returns what «Según el tiempo de hoy» marks now (PBI-21, ADR-037)', async () => {
+    const suggestion = {
+      status: 'available',
+      criterion: 'hot',
+      answers: { sunShade: 'shade', avoidWind: false },
+      message: 'Hace calor (sensación de 31 °C): he marcado «Sombra».',
+      weather: { temperature: 30, source: 'open-meteo' },
+      calculatedAt: { date: '2026-07-10', time: '16:45', timeZone: 'Europe/Madrid' }
+    };
+    routePreferencesService.getWeatherSuggestion.mockResolvedValue(suggestion);
+
+    const response = await request(createApp()).get('/api/route-preferences/weather');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ suggestion });
   });
 
   it('no longer offers the saved routes of PBI-6', async () => {
