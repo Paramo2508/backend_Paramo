@@ -8,20 +8,28 @@ const {
   settingChanges
 } = require('../../domain/assistant/routeAssistant');
 
-const CURRENT = { weights: { shade: 0, sun: 0, wind: 0, vegetation: 0 }, maxDetourPercentage: 25 };
+// The current preferences: everything indifferent and the default 5 minutes (ADR-036).
+const CURRENT = { sunShade: 'any', avoidWind: false, preferParks: false, extraMinutes: 5 };
+const NONE = {
+  sunShade: null,
+  avoidWind: null,
+  preferParks: null,
+  extraMinutes: null,
+  timeChange: null
+};
 const reply = (overrides = {}) => ({
   understood: true,
-  weights: { shade: 50, sun: 0, wind: 0, vegetation: 0 },
-  maxDetourPercentage: 35,
-  explanation: 'He buscado sombra y acepto hasta un 35 % más de tiempo.',
+  ...NONE,
+  sunShade: 'shade',
+  explanation: 'He buscado sombra.',
   ...overrides
 });
 
 describe('buildPrompt', () => {
-  it('sends only the request, the current weights and the city weather', () => {
+  it('sends only the request, the current answers and the city weather', () => {
     const prompt = buildPrompt({
       message: 'prefiero la sombra',
-      ...CURRENT,
+      preferences: CURRENT,
       weather: {
         temperature: 31,
         apparentTemperature: 33,
@@ -35,8 +43,7 @@ describe('buildPrompt', () => {
 
     expect(JSON.parse(prompt.user)).toEqual({
       peticion: 'prefiero la sombra',
-      pesosActuales: CURRENT.weights,
-      tiempoExtraMaximoActual: 25,
+      preferenciasActuales: CURRENT,
       tiempoActual: {
         temperaturaC: 31,
         sensacionTermicaC: 33,
@@ -50,7 +57,7 @@ describe('buildPrompt', () => {
   });
 
   it('works without weather', () => {
-    const prompt = buildPrompt({ message: 'evita el viento', ...CURRENT, weather: null });
+    const prompt = buildPrompt({ message: 'evita el viento', preferences: CURRENT, weather: null });
     expect(JSON.parse(prompt.user).tiempoActual).toBeNull();
   });
 
@@ -60,12 +67,19 @@ describe('buildPrompt', () => {
     expect(SYSTEM_PROMPT).toMatch(/understood=false/);
   });
 
+  it('speaks of answers and minutes, never of weights or percentages (ADR-036)', () => {
+    expect(SYSTEM_PROMPT).toMatch(/"sunShade": "shade".*"sun".*"any"/);
+    expect(SYSTEM_PROMPT).toMatch(/"extraMinutes": .*0, 2, 5, 10, 15/);
+    expect(SYSTEM_PROMPT).toMatch(/sin pesos ni porcentajes/);
+    expect(SYSTEM_PROMPT).not.toMatch(/maxDetourPercentage|"shade": buscar/);
+  });
+
   it('asks for incremental changes, the time rules and first-person explanations', () => {
     expect(SYSTEM_PROMPT).toMatch(/CAMBIOS INCREMENTALES/);
-    expect(SYSTEM_PROMPT).toMatch(/"aunque tarde un poco más": actual \+ 10/);
-    expect(SYSTEM_PROMPT).toMatch(/"aunque tarde más": actual \+ 15/);
-    expect(SYSTEM_PROMPT).toMatch(/"aunque tarde mucho más".*: 40/);
-    expect(SYSTEM_PROMPT).toMatch(/Si la petición no habla del tiempo, devuelve null/);
+    expect(SYSTEM_PROMPT).toMatch(/"a_bit_more" \("aunque tarde un poco más"\)/);
+    expect(SYSTEM_PROMPT).toMatch(/"much_more" \("aunque tarde mucho más"/);
+    expect(SYSTEM_PROMPT).toMatch(/"less" \("sin tardar/);
+    expect(SYSTEM_PROMPT).toMatch(/Si la petición no habla del tiempo, los dos null/);
     expect(SYSTEM_PROMPT).toMatch(/primera persona/);
   });
 
@@ -73,103 +87,93 @@ describe('buildPrompt', () => {
     expect(ASSISTANT_NAME).toBe('Cierzo');
     expect(SYSTEM_PROMPT).toMatch(/Te llamas "Cierzo"/);
     expect(SYSTEM_PROMPT).toMatch(/no\s+es una petición sobre el viento/);
-    expect(SYSTEM_PROMPT).toMatch(/"Cierzo, busca sombra" → shade 50 y\s+wind null/);
+    expect(SYSTEM_PROMPT).toMatch(/"Cierzo, busca sombra" → sunShade "shade" y\s+avoidWind null/);
     // The wind of Zaragoza still counts when the user speaks of it.
-    expect(SYSTEM_PROMPT).toMatch(/"wind": evitar el viento de cara \(cierzo, viento\)/);
+    expect(SYSTEM_PROMPT).toMatch(/"avoidWind": true para evitar el viento de cara \(cierzo/);
   });
 
-  it('lets the model answer null for what it does not change', () => {
-    expect(RESPONSE_SCHEMA.properties.maxDetourPercentage.type).toEqual(['integer', 'null']);
-    expect(RESPONSE_SCHEMA.properties.weights.properties.wind.type).toEqual(['integer', 'null']);
-  });
-
-  it('asks for every field in strict mode', () => {
+  it('lets the model answer null for what it does not change, every field in strict mode', () => {
     expect(RESPONSE_SCHEMA.required).toEqual([
       'understood',
-      'weights',
-      'maxDetourPercentage',
+      'sunShade',
+      'avoidWind',
+      'preferParks',
+      'extraMinutes',
+      'timeChange',
       'explanation'
     ]);
     expect(RESPONSE_SCHEMA.additionalProperties).toBe(false);
-    expect(RESPONSE_SCHEMA.properties.weights.required).toEqual([
-      'shade',
-      'sun',
-      'wind',
-      'vegetation'
-    ]);
+    expect(RESPONSE_SCHEMA.properties.sunShade.type).toEqual(['string', 'null']);
+    expect(RESPONSE_SCHEMA.properties.avoidWind.type).toEqual(['boolean', 'null']);
+    expect(RESPONSE_SCHEMA.properties.extraMinutes.type).toEqual(['integer', 'null']);
   });
 });
 
 describe('interpretReply', () => {
-  const NONE = { shade: null, sun: null, wind: null, vegetation: null };
-  const SHADED = {
-    weights: { shade: 50, sun: 0, wind: 0, vegetation: 0 },
-    maxDetourPercentage: 35
-  };
+  const SHADED = { ...CURRENT, sunShade: 'shade', extraMinutes: 10 };
 
   it('applies the values the model gives and keeps the rest (null)', () => {
-    expect(
-      interpretReply(reply({ weights: { ...NONE, shade: 50 }, maxDetourPercentage: 35 }), CURRENT)
-    ).toEqual({
+    expect(interpretReply(reply({ preferParks: true }), CURRENT)).toEqual({
       understood: true,
-      weights: { shade: 50, sun: 0, wind: 0, vegetation: 0 },
-      maxDetourPercentage: 35,
-      explanation: 'He buscado sombra y acepto hasta un 35 % más de tiempo.'
+      preferences: { ...CURRENT, sunShade: 'shade', preferParks: true },
+      explanation: 'He buscado sombra.'
     });
   });
 
-  it('is incremental: with shade 50, "evita el viento" keeps the shade', () => {
-    const answer = reply({ weights: { ...NONE, wind: 50 }, maxDetourPercentage: null });
-    expect(interpretReply(answer, SHADED)).toMatchObject({
-      weights: { shade: 50, sun: 0, wind: 50, vegetation: 0 },
-      maxDetourPercentage: 35
-    });
+  it('is incremental: with shade, "evita el viento" keeps the shade', () => {
+    const answer = reply({ sunShade: null, avoidWind: true, explanation: 'Evitaré el viento.' });
+    expect(interpretReply(answer, SHADED).preferences).toEqual({ ...SHADED, avoidWind: true });
   });
 
-  it('starting again sets every weight the model gives, also to 0', () => {
-    const answer = reply({
-      weights: { shade: 0, sun: 0, wind: 0, vegetation: 0 },
-      maxDetourPercentage: null
-    });
+  it('starting again sets every answer the model gives, also to "no"', () => {
+    const fastest = reply({ sunShade: 'any', avoidWind: false, preferParks: false });
     expect(
-      interpretReply(answer, { ...SHADED, weights: { ...SHADED.weights, wind: 50 } })
-    ).toMatchObject({ weights: { shade: 0, sun: 0, wind: 0, vegetation: 0 } });
+      interpretReply(fastest, { ...SHADED, avoidWind: true, preferParks: true }).preferences
+    ).toEqual({ ...CURRENT, extraMinutes: 10 });
   });
 
-  it('asking for sun leaves the shade (one scale, ADR-030), and the other way round', () => {
-    expect(interpretReply(reply({ weights: { ...NONE, sun: 40 } }), SHADED).weights).toMatchObject({
-      shade: 0,
-      sun: 40
-    });
-    const sunny = { ...CURRENT, weights: { ...CURRENT.weights, sun: 50 } };
-    expect(interpretReply(reply({ weights: { ...NONE, shade: 30 } }), sunny).weights).toMatchObject(
-      { shade: 30, sun: 0 }
+  it.each([
+    // Moves along 0, 2, 5, 10 and 15 from the current 5.
+    ['a_bit_more', 5, 10],
+    ['more', 5, 15],
+    ['much_more', 0, 15],
+    ['less', 5, 2],
+    ['a_bit_more', 15, 15],
+    ['more', 10, 15],
+    ['less', 0, 0]
+  ])('"%s" from %i minutes gives %i', (timeChange, current, expected) => {
+    expect(
+      interpretReply(reply({ timeChange }), { ...CURRENT, extraMinutes: current }).preferences
+        .extraMinutes
+    ).toBe(expected);
+  });
+
+  it.each([
+    [10, 10],
+    [7, 5],
+    [1, 0],
+    [0, 0],
+    [30, 15]
+  ])('a number of minutes is a maximum: %i gives %i', (extraMinutes, expected) => {
+    expect(interpretReply(reply({ extraMinutes }), CURRENT).preferences.extraMinutes).toBe(
+      expected
     );
   });
 
-  it('the extra time never goes beyond 40 %', () => {
-    const atMax = { ...SHADED, maxDetourPercentage: 40 };
-    expect(interpretReply(reply({ weights: NONE, maxDetourPercentage: 50 }), atMax)).toMatchObject({
-      maxDetourPercentage: 40
-    });
-  });
-
   it('a request that was not understood ignores the rest of the answer', () => {
-    expect(interpretReply({ understood: false, weights: null }, CURRENT)).toEqual({
+    expect(interpretReply({ understood: false, sunShade: 'x' }, CURRENT)).toEqual({
       understood: false
     });
   });
 
   it.each([
-    ['shade and sun at once', reply({ weights: { ...NONE, shade: 50, sun: 30 } })],
-    ['a weight above 100', reply({ weights: { ...NONE, shade: 120 } })],
-    ['a negative weight', reply({ weights: { ...NONE, wind: -5 } })],
-    ['a decimal weight', reply({ weights: { ...NONE, vegetation: 12.5 } })],
-    ['a negative extra time', reply({ maxDetourPercentage: -10 })],
-    ['a decimal extra time', reply({ maxDetourPercentage: 12.5 })],
-    ['no weights', reply({ weights: undefined })],
+    ['shade and sun at once', reply({ sunShade: 'both' })],
+    ['a word that is not an answer', reply({ avoidWind: 'yes' })],
+    ['negative minutes', reply({ extraMinutes: -5 })],
+    ['decimal minutes', reply({ extraMinutes: 2.5 })],
+    ['an unknown time change', reply({ timeChange: 'forever' })],
     ['no explanation', reply({ explanation: '  ' })],
-    ['no understood flag', { weights: NONE }],
+    ['no understood flag', { sunShade: 'shade' }],
     ['not an object', 'shade 50']
   ])('rejects %s as a wrong answer of the model', (_case, answer) => {
     expect(() => interpretReply(answer, CURRENT)).toThrow(
@@ -187,15 +191,12 @@ describe('interpretReply', () => {
 });
 
 describe('settingChanges', () => {
-  it('lists every value that changes, in the order of the editor', () => {
-    const after = {
-      weights: { shade: 0, sun: 0, wind: 50, vegetation: 30 },
-      maxDetourPercentage: 40
-    };
+  it('lists every answer that changes, in the order of the questions', () => {
+    const after = { sunShade: 'sun', avoidWind: true, preferParks: false, extraMinutes: 15 };
     expect(settingChanges(CURRENT, after)).toEqual([
-      { factor: 'wind', before: 0, after: 50 },
-      { factor: 'vegetation', before: 0, after: 30 },
-      { factor: 'maxDetourPercentage', before: 25, after: 40 }
+      { question: 'sunShade', before: 'any', after: 'sun' },
+      { question: 'avoidWind', before: false, after: true },
+      { question: 'extraMinutes', before: 5, after: 15 }
     ]);
   });
 
@@ -203,12 +204,11 @@ describe('settingChanges', () => {
     expect(settingChanges(CURRENT, CURRENT)).toEqual([]);
   });
 
-  it('ignores the extra time when no weight counts', () => {
-    const before = {
-      weights: { shade: 50, sun: 0, wind: 0, vegetation: 0 },
-      maxDetourPercentage: 25
-    };
-    const after = { weights: CURRENT.weights, maxDetourPercentage: 0 };
-    expect(settingChanges(before, after)).toEqual([{ factor: 'shade', before: 50, after: 0 }]);
+  it('ignores the minutes when every answer is indifferent', () => {
+    const before = { ...CURRENT, sunShade: 'shade' };
+    const after = { ...CURRENT, extraMinutes: 0 };
+    expect(settingChanges(before, after)).toEqual([
+      { question: 'sunShade', before: 'shade', after: 'any' }
+    ]);
   });
 });
