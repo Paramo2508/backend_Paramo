@@ -1,8 +1,8 @@
 const { calculateFastestRoute } = require('../../services/routing/fastestRouteService');
+const { calculatePreferredRoute } = require('../../services/routing/preferredRouteService');
 const { adjustRouteWithAssistant } = require('../../services/routing/routeAssistantService');
 const { calculateRecommendedRoute } = require('../../services/routing/recommendedRouteService');
 const { calculateShadedRouteComparison } = require('../../services/routing/shadedRouteService');
-const { calculateWeightedRouteComparison } = require('../../services/routing/weightedRouteService');
 
 async function postFastestRoute(req, res, next) {
   try {
@@ -22,9 +22,10 @@ async function postShadedRoute(req, res, next) {
   }
 }
 
-async function postWeightedRoute(req, res, next) {
+// Route of the user's answers (PBI-18): they become the weights of PBI-6 (ADR-036).
+async function postPreferredRoute(req, res, next) {
   try {
-    const comparison = await calculateWeightedRouteComparison(req.body);
+    const comparison = await calculatePreferredRoute(req.body);
     res.status(200).json({ comparison });
   } catch (error) {
     next(error);
@@ -54,6 +55,6 @@ module.exports = {
   postAssistantRoute,
   postFastestRoute,
   postRecommendedRoute,
-  postShadedRoute,
-  postWeightedRoute
+  postPreferredRoute,
+  postShadedRoute
 };

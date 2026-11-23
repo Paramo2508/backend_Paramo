@@ -16,13 +16,8 @@ jest.mock('../services/routing/routeProfileService', () => ({
   }
 }));
 
-jest.mock('../services/routing/weightedRouteService', () => ({
-  calculateWeightedRouteComparison: jest.fn()
-}));
-
 const { createApp } = require('../app');
 const { routeProfileService } = require('../services/routing/routeProfileService');
-const { calculateWeightedRouteComparison } = require('../services/routing/weightedRouteService');
 
 const profile = { id: 4, name: 'Verano', presetKey: null, weights: { shade: 80, sun: 0 } };
 
@@ -113,19 +108,5 @@ describe('/api/route-profiles with a repeated name (#165)', () => {
 
     expect(response.status).toBe(409);
     expect(response.body).toEqual({ error: { message: 'Puedes guardar como máximo 20 rutas.' } });
-  });
-});
-
-describe('POST /api/routes/weighted', () => {
-  it('returns the comparison for the weights', async () => {
-    const comparison = { status: 'selected', fastest: { duration: 600 } };
-    calculateWeightedRouteComparison.mockResolvedValue(comparison);
-    const body = { origin: { lat: 41.65, lng: -0.88 }, weights: { shade: 50 } };
-
-    const response = await request(createApp()).post('/api/routes/weighted').send(body);
-
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ comparison });
-    expect(calculateWeightedRouteComparison).toHaveBeenCalledWith(body);
   });
 });

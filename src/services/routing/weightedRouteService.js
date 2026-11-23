@@ -1,4 +1,8 @@
 const {
+  alternativesWeightFactor,
+  parseExtraMinutes
+} = require('../../domain/routes/routePreferences');
+const {
   hasEnvironmentalWeight,
   hasShadeWeight,
   hasVegetationWeight,
@@ -28,12 +32,6 @@ const { getZaragozaWeather } = require('../weather/weatherService');
 const OPENNESS_SEARCH_M = 10;
 const { calculateFastestRoute } = require('./fastestRouteService');
 const { evaluateRouteCandidates } = require('./routeCandidates');
-
-// Up to the 25 % of ADR-014 ORS is asked exactly as for the Shaded Route; beyond it, alternatives
-// that are as long as the user accepts.
-function alternativesWeightFactor(maxDurationFactor) {
-  return Math.max(MAX_DURATION_FACTOR, maxDurationFactor);
-}
 
 /*
  * The wind of the request or, without one, the current Open-Meteo wind (PBI-7, cached five
@@ -87,10 +85,33 @@ async function withWindExposures(routes, wind, opennessRepository) {
   });
 }
 
+/*
+ * How much longer than the fastest route the chosen one may be. Since PBI-18 it is `extraMinutes`
+ * over the fastest route (ADR-036). The provisional "Según el tiempo" (the recommended route of
+ * PBI-9.1, until PBI-21) still sends `maxDetourPercentage`, the 25 % of ADR-023: the alternatives are
+ * asked and chosen exactly as before.
+ */
+function extraTimeLimit(input) {
+  if (input?.maxDetourPercentage !== undefined && input?.extraMinutes === undefined) {
+    const maxDurationFactor = 1 + parseMaxDetour(input.maxDetourPercentage) / 100;
+    return {
+      strategy: { maximumDurationFactor: maxDurationFactor },
+      weightFactor: Math.max(MAX_DURATION_FACTOR, maxDurationFactor),
+      selection: { maxDurationFactor }
+    };
+  }
+  const extraMinutes = parseExtraMinutes(input?.extraMinutes);
+  return {
+    strategy: { maximumExtraMinutes: extraMinutes },
+    weightFactor: alternativesWeightFactor(extraMinutes),
+    selection: { maxExtraSeconds: extraMinutes * 60 }
+  };
+}
+
 /**
- * The fastest route and, if one of the ORS alternatives suits the weights better, that one
- * (ADR-023, wind in ADR-025). With every weight at 0 only time matters: no alternatives or shadows
- * are calculated; with only wind, no shadows.
+ * The fastest route and, if one of the ORS alternatives suits the weights better and takes at most
+ * `extraMinutes` more, that one (ADR-023, wind in ADR-025, minutes in ADR-036). With every weight at 0
+ * only time matters: no alternatives or shadows are calculated; with only wind, no shadows.
  */
 async function calculateWeightedRouteComparison(
   input,
@@ -103,11 +124,10 @@ async function calculateWeightedRouteComparison(
   } = {}
 ) {
   const weights = parseWeights(input?.weights);
-  const maxDetourPercentage = parseMaxDetour(input?.maxDetourPercentage);
+  const limit = extraTimeLimit(input);
   const requestedWind = parseRouteWind(input?.wind);
-  const maxDurationFactor = 1 + maxDetourPercentage / 100;
   const strategy = {
-    maximumDurationFactor: maxDurationFactor,
+    ...limit.strategy,
     minimumImprovementPercentagePoints: MIN_IMPROVEMENT_PERCENTAGE_POINTS
   };
   const wind = await resolveWind(requestedWind, weights, weather);
@@ -129,7 +149,7 @@ async function calculateWeightedRouteComparison(
     };
   }
 
-  const weightFactor = alternativesWeightFactor(maxDurationFactor);
+  const { weightFactor } = limit;
   const { routes, exposureStatus, reference } = await evaluateRouteCandidates(input, {
     routesProvider: (points) => alternativesProvider(points, { weightFactor }),
     includeShade: hasShadeWeight(weights),
@@ -140,7 +160,7 @@ async function calculateWeightedRouteComparison(
   const selection = selectWeightedRoute(
     await withWindExposures(routes, wind, opennessRepository),
     weights,
-    { maxDurationFactor }
+    limit.selection
   );
   const status = exposureStatus || selection.status;
   const isSelected = status === 'selected';
