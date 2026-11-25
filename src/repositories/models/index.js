@@ -98,6 +98,7 @@ const RoutePreference = sequelize.define(
     avoidWind: { type: DataTypes.BOOLEAN, allowNull: false },
     preferParks: { type: DataTypes.BOOLEAN, allowNull: false },
     extraMinutes: { type: DataTypes.SMALLINT, allowNull: false },
+    byWeather: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }
   },
   { ...options, tableName: 'route_preferences' }

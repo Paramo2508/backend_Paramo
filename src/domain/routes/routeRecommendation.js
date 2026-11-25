@@ -122,12 +122,14 @@ function weightsFor(baseState, windy, config) {
 
 function unavailable() {
   const { weights, maxDetourPercentage } = weightsFor('weather_unavailable', false, {});
+  const cause = 'No se ha podido consultar el tiempo actual';
   return {
     criterion: 'weather_unavailable',
     label: 'Sin datos del tiempo',
     weights,
     maxDetourPercentage,
-    reason: 'No se ha podido consultar el tiempo actual: la ruta recomendada es la más rápida.',
+    cause,
+    reason: `${cause}: la ruta recomendada es la más rápida.`,
     rules: []
   };
 }
@@ -162,15 +164,19 @@ function lowSunRecommendation(weather, sunElevationDeg, wind, config) {
   const { label, text: sunText, rule: sunRule } = sunState(sunElevationDeg, config);
   const { weights, maxDetourPercentage } = weightsFor('low_sun', wind.windy, config);
   const detour = `aceptando hasta un ${maxDetourPercentage} % más de tiempo`;
+  const cause = wind.windy
+    ? `${sunText} y ${windText(weather, config)}`
+    : `${sunText} y hay poco viento (${round(weather.windSpeed)} km/h)`;
 
   return {
     criterion: wind.windy ? 'low_sun_windy' : 'low_sun',
     label: `${label}${wind.windy ? ` y ${windLabel(weather, config)}` : ''}`,
     weights,
     maxDetourPercentage,
+    cause,
     reason: wind.windy
-      ? `${sunText} y ${windText(weather, config)}: se evita el viento de cara ${detour}.`
-      : `${sunText} y hay poco viento (${round(weather.windSpeed)} km/h): la ruta recomendada es la más rápida.`,
+      ? `${cause}: se evita el viento de cara ${detour}.`
+      : `${cause}: la ruta recomendada es la más rápida.`,
     rules: [sunRule, ...wind.rules]
   };
 }
@@ -197,27 +203,35 @@ function daylightRecommendation(weather, sunElevationDeg, wind, config) {
   const feels = `${reading.text} de ${round(reading.value)} °C`;
 
   if (thermal.state === 'mild') {
+    const cause = wind.windy
+      ? capitalize(windText(weather, config))
+      : `Temperatura agradable (${feels}) y poco viento (${round(weather.windSpeed)} km/h)`;
     return {
       criterion: wind.windy ? 'windy' : 'mild',
       label: wind.windy ? capitalize(windLabel(weather, config)) : THERMAL_LABELS.mild,
       weights,
       maxDetourPercentage,
+      cause,
       reason: wind.windy
-        ? `${capitalize(windText(weather, config))}: se evita el viento de cara ${detour}.`
-        : `Temperatura agradable (${feels}) y poco viento (${round(weather.windSpeed)} km/h): la ruta recomendada es la más rápida.`,
+        ? `${cause}: se evita el viento de cara ${detour}.`
+        : `${cause}: la ruta recomendada es la más rápida.`,
       rules
     };
   }
 
   const thermalText = thermal.state === 'hot' ? 'Hace calor' : 'Hace frío';
+  const cause = wind.windy
+    ? `${thermalText} (${feels}) y ${windText(weather, config)}`
+    : `${thermalText} (${feels})`;
   return {
     criterion: wind.windy ? `${thermal.state}_windy` : thermal.state,
     label: `${THERMAL_LABELS[thermal.state]}${wind.windy ? ` y ${windLabel(weather, config)}` : ''}`,
     weights,
     maxDetourPercentage,
+    cause,
     reason: wind.windy
-      ? `${thermalText} (${feels}) y ${windText(weather, config)}: ${THERMAL_GOALS[thermal.state]} y evitar el viento de cara, ${detour}.`
-      : `${thermalText} (${feels}): ${THERMAL_GOALS[thermal.state]} ${detour}.`,
+      ? `${cause}: ${THERMAL_GOALS[thermal.state]} y evitar el viento de cara, ${detour}.`
+      : `${cause}: ${THERMAL_GOALS[thermal.state]} ${detour}.`,
     rules
   };
 }

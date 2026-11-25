@@ -90,6 +90,7 @@ Las preferencias sencillas de cada usuario, una fila por usuario (migración
 | `avoid_wind` | boolean, not null | Evitar el viento |
 | `prefer_parks` | boolean, not null | Por parques |
 | `extra_minutes` | smallint, not null | Minutos extra: 0, 2, 5, 10 o 15 (`CHECK`); 5 por defecto |
+| `by_weather` | boolean, not null | «Según el tiempo de hoy» activado (PBI-21, migración `20261124000001-add-route-preferences-by-weather`): `true` por defecto en las filas nuevas; las que ya existían quedan en `false` |
 | `updated_at` | timestamptz | Último cambio |
 
 Las tablas de las rutas guardadas (`route_profiles` y `users.route_profiles_seeded`) se quedan sin
@@ -912,12 +913,19 @@ minutos son un tope, no una promesa: ORS no propone alternativas más largas que
 Con sesión. `GET` devuelve las del usuario o las de por defecto si nunca guardó ninguna:
 
 ```json
-{ "preferences": { "sunShade": "any", "avoidWind": false, "preferParks": false, "extraMinutes": 5 } }
+{
+  "preferences": {
+    "sunShade": "any", "avoidWind": false, "preferParks": false, "extraMinutes": 5,
+    "byWeather": true
+  }
+}
 ```
 
-`PUT` las sustituye todas (los cuatro campos son obligatorios) y responde `200` con lo guardado.
-Un valor que no es una de las opciones → `400` con `fields` ("Elige «Sombra», «Sol» o «Me da
-igual».", "Debe ser sí o no.", "Elige 0, 2, 5, 10 o 15 minutos.").
+`PUT` las sustituye todas (los cuatro campos de las respuestas son obligatorios) y responde `200`
+con lo guardado. `byWeather` (PBI-21) es opcional: si no se envía, se guarda `false`. Un valor que
+no es una de las opciones → `400` con `fields` ("Elige «Sombra», «Sol» o «Me da igual».", "Debe ser
+sí o no.", "Elige 0, 2, 5, 10 o 15 minutos."). `byWeather` no forma parte de las preferencias de
+una ruta (`POST /api/routes/preferred` y el asistente): el tiempo solo marca las respuestas.
 
 ### `POST /api/routes/preferred`
 
@@ -939,11 +947,31 @@ más abajo: `status`, `weights`, `wind`, `fastest`, `selected`, `additionalDurat
 `candidatesEvaluated`, `strategy`) más `preferences` (las respuestas y `hasPreference`).
 `POST /api/routes/weighted` ya no existe (`404`): los pesos no forman parte de la API.
 
-### «Según el tiempo» (provisional hasta la PBI-21)
+### `GET /api/route-preferences/weather` — «Según el tiempo de hoy» (PBI-21)
 
-`POST /api/routes/recommended` no cambia: el frontend lo usa como botón provisional «Según el
-tiempo», exactamente como la antigua «Recomendada» (sus pesos y su 25 % de tiempo extra). No se
-guarda en la cuenta. La PBI-21 (weathermapz-gestion #185) lo sustituirá.
+Con sesión. Qué respuestas marca el tiempo de ahora, con la regla y los umbrales de la ruta
+recomendada (ADR-029) y sin calcular ninguna ruta (ADR-037): sombra con calor, sol con frío y
+evitar el viento con viento fuerte; con tiempo templado, de noche o con el Sol bajo, todo indiferente
+(la ruta más rápida). «Por parques» nunca se marca: no viene en `answers`. El Sol se calcula en el
+centro del término municipal (aún no hay origen). No guarda nada: el frontend marca las respuestas y
+las guarda con `PUT`.
+
+```json
+{
+  "suggestion": {
+    "status": "available",
+    "criterion": "hot",
+    "answers": { "sunShade": "shade", "avoidWind": false },
+    "message": "Hace calor (sensación de 31 °C): he marcado «Sombra».",
+    "weather": { "temperature": 30, "apparentTemperature": 31, "windSpeed": 8, "source": "open-meteo" },
+    "calculatedAt": { "date": "2026-07-10", "time": "16:45", "timeZone": "Europe/Madrid" }
+  }
+}
+```
+
+Si Open-Meteo falla no es un error: `status` es `unavailable`, `answers` es `null`, `weather` es
+`null` y `message` es "No se ha podido consultar el tiempo actual: tus preferencias se quedan como
+estaban.". `POST /api/routes/recommended` sigue existiendo, pero el frontend ya no lo usa.
 
 ### Migración de las rutas guardadas
 
@@ -1138,7 +1166,8 @@ Responde `204`. Borra los lugares recientes del usuario; los favoritos se mantie
 
 > **Desde la PBI-18** este endpoint ya no existe (`404`). El mismo cálculo lo usan
 > `POST /api/routes/preferred`, `POST /api/routes/recommended` y el asistente; el tiempo extra es en
-> minutos (`extraMinutes`) salvo en `/recommended`, que conserva su 25 % hasta la PBI-21. Lo que
+> minutos (`extraMinutes`) salvo en `/recommended`, que conserva su 25 % (desde la PBI-21 el
+> frontend ya no lo usa). Lo que
 > sigue describe el cálculo, que no cambia.
 
 El mismo cuerpo que `POST /api/routes/shaded` más `"weights": { "shade": 80, "sun": 0, "wind": 0 }`
@@ -1348,8 +1377,9 @@ Groq está activada la retención cero (ZDR).
 
 ## Ruta recomendada (PBI-9.1)
 
-> **Desde la PBI-18** el frontend la ofrece como botón provisional «Según el tiempo» hasta la
-> PBI-21 (#185). El endpoint no cambia: mismos pesos y mismo 25 % de tiempo extra.
+> **Desde la PBI-21** el frontend ya no la usa: «Según el tiempo de hoy» pide
+> `GET /api/route-preferences/weather`, que aplica esta misma regla para marcar las respuestas, y la
+> ruta se calcula con `POST /api/routes/preferred` y los minutos del usuario. El endpoint no cambia.
 
 `POST /api/routes/recommended` elige los pesos de la ruta con el tiempo actual de Open-Meteo y la
 altura del Sol, y calcula la ruta con ellos con el cálculo ponderado de la PBI-6. Requiere sesión,
@@ -1565,6 +1595,29 @@ códigos controlados que `/api/routes/fastest`; si el cálculo de sombras supera
 pero no añade migraciones ni dependencias.
 
 ## Checklist de verificación manual
+
+### PBI-21 - Según el tiempo de hoy
+
+Con el servidor arrancado y `$api` y `$h` como en la checklist de la PBI-9.1.
+
+```powershell
+Invoke-RestMethod "$api/route-preferences/weather" -Headers $h | ConvertTo-Json -Depth 4
+Invoke-RestMethod "$api/route-preferences" -Headers $h | ConvertTo-Json
+```
+
+- [ ] `npm run db:migrate` añade `route_preferences.by_weather`; las filas que ya existían quedan en
+      `false`; `npm run db:migrate:undo` la quita y se puede volver a aplicar.
+- [ ] Un usuario nuevo: `GET /api/route-preferences` → `byWeather` `true`. `PUT` con `byWeather`
+      `false` y otro `GET` → `false`; `PUT` sin `byWeather` → `false`; con `"yes"` → `400`.
+- [ ] `GET /api/route-preferences/weather` devuelve `status` `available`, las respuestas y un
+      `message` con el motivo (comprobado el 2026-11-23 a las 20:05: «Es de noche y hay poco viento
+      (1 km/h): no hace falta desviarse, así que te propongo la ruta más rápida.»). `answers` nunca
+      trae `preferParks`.
+- [ ] Sin red hacia Open-Meteo → `status` `unavailable`, `answers` `null` y el mensaje de que no
+      cambia nada.
+- [ ] `npm run ci` pasa (`weatherPreferences.test.js`, `routePreferencesService.test.js`,
+      `routeRecommendation.test.js` y `routePreferences.test.js` de API).
+
 
 ### PBI-18 - Preferencias sencillas
 
