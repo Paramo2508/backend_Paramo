@@ -27,6 +27,16 @@ async function getMe(req, res, next) {
   }
 }
 
+async function patchTutorialStatus(req, res, next) {
+  try {
+    res
+      .status(200)
+      .json({ user: await authService.updateTutorialStatus(req.userId, req.body?.status) });
+  } catch (error) {
+    next(error);
+  }
+}
+
 // The token travels in the URL fragment (#), which browsers never send to any server, so it
 // does not end up in access logs. The frontend reads it and removes it from the address bar.
 async function getGoogleCallback(req, res) {
@@ -39,4 +49,4 @@ async function getGoogleCallback(req, res) {
   }
 }
 
-module.exports = { postRegister, postLogin, getMe, getGoogleCallback };
+module.exports = { postRegister, postLogin, getMe, patchTutorialStatus, getGoogleCallback };

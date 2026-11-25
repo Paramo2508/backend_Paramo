@@ -8,7 +8,8 @@ jest.mock('../repositories/userRepository', () => ({
   findByEmail: jest.fn(),
   findByGoogleId: jest.fn(),
   createUser: jest.fn(),
-  linkGoogleAccount: jest.fn()
+  linkGoogleAccount: jest.fn(),
+  setTutorialStatus: jest.fn()
 }));
 
 const { createApp } = require('../app');
@@ -179,6 +180,31 @@ describe('authentication API', () => {
         .set('Authorization', `Bearer ${signToken(storedUser)}`);
 
       expect(response.status).toBe(401);
+    });
+
+    it('saves the completed or skipped tutorial state for the authenticated user', async () => {
+      userRepository.setTutorialStatus.mockResolvedValue({
+        ...storedUser,
+        tutorialStatus: 'skipped'
+      });
+      const response = await request(createApp())
+        .patch('/api/auth/me/tutorial')
+        .set('Authorization', `Bearer ${signToken(storedUser)}`)
+        .send({ status: 'skipped' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.user.tutorialStatus).toBe('skipped');
+      expect(userRepository.setTutorialStatus).toHaveBeenCalledWith(7, 'skipped');
+    });
+
+    it('rejects an invalid tutorial state', async () => {
+      const response = await request(createApp())
+        .patch('/api/auth/me/tutorial')
+        .set('Authorization', `Bearer ${signToken(storedUser)}`)
+        .send({ status: 'started' });
+
+      expect(response.status).toBe(400);
+      expect(userRepository.setTutorialStatus).not.toHaveBeenCalled();
     });
 
     it.each([
