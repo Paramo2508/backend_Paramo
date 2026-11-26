@@ -11,7 +11,21 @@ const INVALID_CREDENTIALS = 'El correo o la contraseña no son correctos.';
 const EMAIL_IN_USE = 'Ya existe una cuenta con este correo electrónico.';
 
 function toPublicUser(user) {
-  return { id: user.id, name: user.name, email: user.email };
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    ...(user.tutorialStatus ? { tutorialStatus: user.tutorialStatus } : {})
+  };
+}
+
+async function updateTutorialStatus(userId, status) {
+  if (!['completed', 'skipped'].includes(status)) {
+    throw httpError(400, 'El estado del tutorial no es válido.');
+  }
+  const user = await userRepository.setTutorialStatus(userId, status);
+  if (!user) throw httpError(401, 'Tu sesión no es válida o ha caducado. Inicia sesión de nuevo.');
+  return toPublicUser(user);
 }
 
 function validationError(fields) {
@@ -98,4 +112,4 @@ async function getCurrentUser(userId) {
   return toPublicUser(user);
 }
 
-module.exports = { register, login, loginWithGoogle, getCurrentUser };
+module.exports = { register, login, loginWithGoogle, getCurrentUser, updateTutorialStatus };

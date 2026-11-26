@@ -1,6 +1,6 @@
 const { User } = require('./models');
 
-const ATTRIBUTES = ['id', 'name', 'email', 'passwordHash', 'googleId'];
+const ATTRIBUTES = ['id', 'name', 'email', 'passwordHash', 'googleId', 'tutorialStatus'];
 
 function findById(id) {
   return User.findByPk(id, { attributes: ATTRIBUTES, raw: true });
@@ -24,4 +24,16 @@ async function linkGoogleAccount(id, googleId) {
   return findById(id);
 }
 
-module.exports = { findById, findByEmail, findByGoogleId, createUser, linkGoogleAccount };
+async function setTutorialStatus(id, tutorialStatus) {
+  await User.update({ tutorialStatus }, { where: { id } });
+  return findById(id);
+}
+
+module.exports = {
+  findById,
+  findByEmail,
+  findByGoogleId,
+  createUser,
+  linkGoogleAccount,
+  setTutorialStatus
+};

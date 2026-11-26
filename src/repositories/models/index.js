@@ -83,7 +83,8 @@ const User = sequelize.define(
     name: { type: DataTypes.STRING(100), allowNull: false },
     email: { type: DataTypes.STRING(254), allowNull: false },
     passwordHash: DataTypes.STRING(100),
-    googleId: DataTypes.STRING(255)
+    googleId: DataTypes.STRING(255),
+    tutorialStatus: DataTypes.STRING(10)
   },
   { underscored: true, timestamps: true, tableName: 'users' }
 );
